@@ -1,0 +1,91 @@
+name: Build Telegram Web Android APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'نوع النسخة (Debug أو Release)'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Node Dependencies
+        run: npm install
+
+      - name: 🔨 Build Web Application (Vite)
+        run: npm run build
+
+      - name: ☕ Setup Java 17 (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🔄 Sync Capacitor Android Platform
+        run: npx cap sync android
+
+      - name: 🔑 Set Executable Permissions for Gradle Wrapper
+        run: |
+          chmod +x ./android/gradlew || true
+
+      - name: 🚀 Build Android Debug APK
+        working-directory: android
+        run: |
+          if [ -f "./gradlew" ]; then
+            ./gradlew assembleDebug --stacktrace
+          else
+            gradle assembleDebug --stacktrace
+          fi
+
+      - name: 🔍 Locate Generated APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::لم يتم العثور على ملف APK بعد البناء!"
+            exit 1
+          fi
+          echo "Found APK at: $APK_PATH"
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          cp "$APK_PATH" ./telegram-web-debug.apk
+
+      - name: 📤 Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-Web-APK
+          path: ./telegram-web-debug.apk
+          retention-days: 14
+
+      - name: 📋 Summary
+        run: |
+          echo "### 📱 تم بناء نسخة APK بنجاح! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "- **اسم التطبيق**: Telegram Web" >> $GITHUB_STEP_SUMMARY
+          echo "- **الحزمة (Package ID)**: org.telegram.web.app" >> $GITHUB_STEP_SUMMARY
+          echo "- **الملف الناتج**: \`telegram-web-debug.apk\`" >> $GITHUB_STEP_SUMMARY
+          echo "- يمكنك تنزيل ملف الـ APK مباشرة من قسم **Artifacts** في هذه الصفحة وتثبيته على هاتفك الأندرويد." >> $GITHUB_STEP_SUMMARY

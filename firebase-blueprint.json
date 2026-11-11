@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information in Telegram",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "username": { "type": "string", "maxLength": 50 },
+        "photoURL": { "type": "string", "maxLength": 2048 },
+        "avatarColor": { "type": "string", "maxLength": 30 },
+        "bio": { "type": "string", "maxLength": 300 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "isOnline": { "type": "boolean" },
+        "lastSeen": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "displayName"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Telegram conversation (direct, group, channel, or saved messages)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["direct", "group", "channel", "saved"] },
+        "title": { "type": "string", "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 2048 },
+        "avatarColor": { "type": "string", "maxLength": 30 },
+        "description": { "type": "string", "maxLength": 500 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "memberIds": { "type": "array" },
+        "pinnedMessageId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "type", "title", "createdBy"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Chat message including text, media, voice, sticker, or poll",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "chatId": { "type": "string", "maxLength": 128 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "senderPhoto": { "type": "string", "maxLength": 2048 },
+        "text": { "type": "string", "maxLength": 4000 },
+        "type": { "type": "string", "enum": ["text", "image", "file", "voice", "sticker", "poll"] },
+        "mediaUrl": { "type": "string", "maxLength": 500000 },
+        "mediaName": { "type": "string", "maxLength": 200 },
+        "mediaSize": { "type": "string", "maxLength": 50 },
+        "voiceDuration": { "type": "number" },
+        "replyToId": { "type": "string", "maxLength": 128 },
+        "replyToText": { "type": "string", "maxLength": 300 },
+        "isPinned": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "chatId", "senderId", "text", "type"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Public and personal profile data for users"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Direct, group, and channel chats"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages sent within a chat"
+    }
+  }
+}

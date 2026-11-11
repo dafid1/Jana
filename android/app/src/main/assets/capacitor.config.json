@@ -1,0 +1,9 @@
+{
+	"appId": "org.telegram.web.app",
+	"appName": "Telegram Web",
+	"webDir": "dist",
+	"bundledWebRuntime": false,
+	"server": {
+		"androidScheme": "https"
+	}
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Telegram Web",
+  "description": "تطبيق محادثة تيليجرام ويب فائق السرعة والمطابق لتصميم Telegram مع دعم الدردشات الفردية والجماعية والقنوات وملاحظات الصوت والملصقات مع قاعدة بيانات Firebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

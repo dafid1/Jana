@@ -1,0 +1,69 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Connection testing
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    // Chats collection
+    match /chats/{chatId} {
+      allow get: if isSignedIn() && (
+        resource.data.type == 'channel' ||
+        request.auth.uid in resource.data.memberIds ||
+        resource.data.createdBy == request.auth.uid
+      );
+      
+      allow list: if isSignedIn() && (
+        request.auth.uid in resource.data.memberIds
+      );
+      
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      
+      allow update: if isSignedIn() && (
+        resource.data.type == 'channel' ||
+        request.auth.uid in resource.data.memberIds ||
+        resource.data.createdBy == request.auth.uid
+      );
+      
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+
+      // Messages sub-collection
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && (
+          request.resource.data.senderId == request.auth.uid ||
+          request.resource.data.senderId == 'system_bot'
+        );
+        allow update: if isSignedIn() && (
+          resource.data.senderId == request.auth.uid ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'isPinned', 'pollData'])
+        );
+        allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+      }
+    }
+  }
+}
