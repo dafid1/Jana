@@ -1,24 +1,67 @@
 import React from 'react';
-import { Check, CheckCheck, Pin, Bookmark, Megaphone, Users, Bot } from 'lucide-react';
-import { Chat } from '../../types/telegram';
+import { Check, CheckCheck, Pin, Bookmark, Megaphone, Users } from 'lucide-react';
+import { Chat, Message } from '../../types/telegram';
 import { useAuth } from '../../context/AuthContext';
-import { getAvatarGradient, getInitials, formatTelegramTime } from '../../utils/telegramHelpers';
+import { useChat } from '../../context/ChatContext';
+import {
+  getAvatarGradient,
+  getInitials,
+  formatTelegramTime,
+  getMessageReplyPreview,
+} from '../../utils/telegramHelpers';
 
 interface ChatListItemProps {
   chat: Chat;
   isActive: boolean;
   onClick: () => void;
+  matchedMessage?: Message;
+  searchHighlight?: string;
 }
 
-export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive, onClick }) => {
+function highlightMatch(text: string, query?: string): React.ReactNode {
+  if (!query || !text) return text;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const idx = lowerText.indexOf(lowerQuery);
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-[#2481cc]/35 text-inherit rounded px-0.5 font-semibold">
+        {text.slice(idx, idx + query.length)}
+      </mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
+export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({
+  chat,
+  isActive,
+  onClick,
+  matchedMessage,
+  searchHighlight,
+}) => {
   const { theme, currentUser } = useAuth();
-  const isUserSender = chat.lastMessage?.senderId === currentUser?.uid;
+  const { getChatDisplayInfo } = useChat();
+
+  const displayInfo = getChatDisplayInfo(chat);
+  const snippetText = matchedMessage
+    ? getMessageReplyPreview(matchedMessage)
+    : chat.lastMessage?.text || 'لا توجد رسائل بعد';
+  const snippetTime = matchedMessage?.createdAt || chat.lastMessage?.createdAt || chat.updatedAt;
+  const isUserSender = matchedMessage
+    ? matchedMessage.senderId === currentUser?.uid
+    : chat.lastMessage?.senderId === currentUser?.uid;
+  const readBy = matchedMessage?.readBy || chat.lastMessage?.readBy || [];
+  const isReadByOthers =
+    chat.type === 'saved' ||
+    readBy.some((uid) => uid !== currentUser?.uid);
 
   const getChatIcon = () => {
     if (chat.type === 'saved') return <Bookmark className="w-5 h-5 text-white" />;
     if (chat.type === 'channel') return <Megaphone className="w-4 h-4 text-white" />;
     if (chat.type === 'group') return <Users className="w-4 h-4 text-white" />;
-    if (chat.title.includes('Bot')) return <Bot className="w-5 h-5 text-white" />;
     return null;
   };
 
@@ -39,20 +82,26 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive, onCl
       <div className="relative shrink-0">
         <div
           className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-base text-white shadow-xs overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
-            chat.id
+            displayInfo.otherUser?.uid || chat.id
           )}`}
         >
-          {chat.photoURL ? (
-            <img src={chat.photoURL} alt={chat.title} className="w-full h-full object-cover" />
+          {displayInfo.photoURL ? (
+            <img
+              src={displayInfo.photoURL}
+              alt={displayInfo.title}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
           ) : getChatIcon() ? (
             getChatIcon()
           ) : (
-            <span>{getInitials(chat.title)}</span>
+            <span>{getInitials(displayInfo.title)}</span>
           )}
         </div>
 
-        {/* Online Indicator for direct chats */}
-        {chat.type === 'direct' && !chat.title.includes('Bot') && (
+        {/* Real Online Indicator for direct chats */}
+        {chat.type === 'direct' && displayInfo.isOnline && (
           <div className="absolute bottom-0 left-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#17212b] rounded-full" />
         )}
       </div>
@@ -63,16 +112,10 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive, onCl
           <div className="flex items-center gap-1.5 min-w-0">
             <h3
               className={`text-sm font-semibold truncate ${
-                isActive
-                  ? theme === 'light'
-                    ? 'text-gray-900'
-                    : 'text-white'
-                  : theme === 'light'
-                  ? 'text-gray-900'
-                  : 'text-white'
+                theme === 'light' ? 'text-gray-900' : 'text-white'
               }`}
             >
-              {chat.title}
+              {highlightMatch(displayInfo.title, searchHighlight)}
             </h3>
             {chat.type === 'channel' && (
               <span className="shrink-0 text-[#2481cc] text-[11px] font-bold">✓</span>
@@ -91,11 +134,11 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive, onCl
                 : 'text-[#7f91a4]'
             }`}
           >
-            {formatTelegramTime(chat.lastMessage?.createdAt || chat.updatedAt)}
+            {formatTelegramTime(snippetTime)}
           </span>
         </div>
 
-        {/* Snippet & Status */}
+        {/* Snippet & Real Read Status */}
         <div className="flex items-center justify-between gap-1">
           <p
             className={`text-xs truncate flex-1 ${
@@ -109,11 +152,20 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive, onCl
             }`}
           >
             {isUserSender && (
-              <span className="inline-flex items-center ml-1 align-middle text-[#2481cc]">
-                <CheckCheck className="w-3.5 h-3.5 inline" />
+              <span
+                className={`inline-flex items-center ml-1 align-middle ${
+                  isReadByOthers ? 'text-[#38bdf8]' : 'opacity-65'
+                }`}
+                title={isReadByOthers ? 'تمت القراءة' : 'تم الإرسال'}
+              >
+                {isReadByOthers ? (
+                  <CheckCheck className="w-3.5 h-3.5 inline" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 inline" />
+                )}
               </span>
             )}
-            {chat.lastMessage?.text || 'لا توجد رسائل بعد'}
+            {highlightMatch(snippetText, searchHighlight)}
           </p>
 
           {/* Badges / Pin */}
@@ -139,4 +191,4 @@ export const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isActive, onCl
       </div>
     </div>
   );
-};
+});

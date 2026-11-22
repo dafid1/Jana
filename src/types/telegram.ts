@@ -2,16 +2,20 @@ export type ChatType = 'direct' | 'group' | 'channel' | 'saved';
 
 export type MessageType = 'text' | 'image' | 'file' | 'voice' | 'sticker' | 'poll' | 'dice';
 
+export type UserRole = 'admin' | 'user';
+
 export interface UserProfile {
   uid: string;
+  username: string; // e.g., "jehan", "ahmed" (lowercase without @)
   displayName: string;
-  username?: string;
+  role: UserRole;
   photoURL?: string;
   avatarColor?: string;
   bio?: string;
   phone?: string;
   isOnline?: boolean;
   lastSeen?: string;
+  createdBy?: string;
   createdAt?: string;
 }
 
@@ -64,7 +68,7 @@ export interface Message {
   inlineButtons?: InlineButton[][];
   diceValue?: number;
   createdAt: string;
-  readBy?: string[];
+  readBy?: string[]; // Real array of user UIDs who have read this message
 }
 
 export interface Chat {
@@ -74,6 +78,7 @@ export interface Chat {
   photoURL?: string;
   avatarColor?: string;
   description?: string;
+  inviteCode?: string; // Unique invite code for groups
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -86,11 +91,30 @@ export interface Chat {
     senderName: string;
     createdAt: string;
     type?: MessageType;
+    readBy?: string[];
   };
+  unreadCounts?: Record<string, number>;
   unreadCount?: number;
   isMuted?: boolean;
   isPinned?: boolean;
-  typingStatus?: string; // e.g. "يكتب الآن...", "يسجل رسالة صوتية..."
+  typingStatus?: string;
+}
+
+export interface TypingIndicator {
+  uid: string;
+  displayName: string;
+  isTyping: boolean;
+  updatedAt: string;
+}
+
+export interface GroupInvite {
+  inviteCode: string;
+  chatId: string;
+  title: string;
+  description?: string;
+  photoURL?: string;
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface Story {
@@ -102,7 +126,7 @@ export interface Story {
   mediaUrl: string;
   caption?: string;
   createdAt: string;
-  viewsCount?: number;
+  viewedBy?: string[];
 }
 
 export type ChatWallpaper = 'classic' | 'night' | 'emerald' | 'purple' | 'desert' | 'mesh';
@@ -117,4 +141,35 @@ export interface CallState {
   isMuted: boolean;
   isCameraOff: boolean;
   chat: Chat | null;
+}
+
+export interface StickerItem {
+  id: string;
+  packId: string;
+  emoji: string;
+  name: string;
+  label: string;
+  url: string;
+  keywords?: string[];
+  isCustom?: boolean;
+}
+
+export interface StickerPack {
+  id: string;
+  title: string;
+  icon: string;
+  stickers: StickerItem[];
+}
+
+export interface UserStickerDoc {
+  id: string;
+  uid: string;
+  emoji: string;
+  name: string;
+  label: string;
+  url: string;
+  isCustom: boolean;
+  useCount: number;
+  lastUsedAt: string;
+  createdAt: string;
 }

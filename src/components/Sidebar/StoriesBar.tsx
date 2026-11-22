@@ -8,8 +8,8 @@ interface StoriesBarProps {
   onOpenNewStory: () => void;
 }
 
-export const StoriesBar: React.FC<StoriesBarProps> = ({ onOpenNewStory }) => {
-  const { theme, userProfile } = useAuth();
+export const StoriesBar: React.FC<StoriesBarProps> = React.memo(({ onOpenNewStory }) => {
+  const { theme, userProfile, usersMap } = useAuth();
   const { stories, setActiveStoryIndex } = useChat();
 
   return (
@@ -30,6 +30,8 @@ export const StoriesBar: React.FC<StoriesBarProps> = ({ onOpenNewStory }) => {
                 <img
                   src={userProfile.photoURL}
                   alt="My Story"
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full rounded-full object-cover"
                 />
               ) : (
@@ -47,41 +49,48 @@ export const StoriesBar: React.FC<StoriesBarProps> = ({ onOpenNewStory }) => {
       </div>
 
       {/* Stories List */}
-      {stories.map((story, index) => (
-        <div
-          key={story.id}
-          onClick={() => setActiveStoryIndex(index)}
-          className="flex flex-col items-center gap-1 cursor-pointer shrink-0 group"
-        >
-          {/* Gradient Ring Avatar */}
-          <div className="p-0.5 rounded-full bg-gradient-to-tr from-[#2481cc] via-[#a674e0] to-[#e17076] group-hover:scale-105 transition-transform duration-200">
-            <div
-              className={`w-12 h-12 rounded-full p-0.5 ${
-                theme === 'light' ? 'bg-white' : 'bg-[#17212b]'
-              }`}
-            >
+      {stories.map((story, index) => {
+        const author = usersMap[story.userId];
+        const authorName = author?.displayName || story.userName;
+        const authorAvatar = author?.photoURL || story.userAvatar;
+        return (
+          <div
+            key={story.id}
+            onClick={() => setActiveStoryIndex(index)}
+            className="flex flex-col items-center gap-1 cursor-pointer shrink-0 group"
+          >
+            {/* Gradient Ring Avatar */}
+            <div className="p-0.5 rounded-full bg-gradient-to-tr from-[#2481cc] via-[#a674e0] to-[#e17076] group-hover:scale-105 transition-transform duration-200">
               <div
-                className={`w-full h-full rounded-full overflow-hidden flex items-center justify-center font-bold text-xs text-white bg-gradient-to-tr ${getAvatarGradient(
-                  story.userId
-                )}`}
+                className={`w-12 h-12 rounded-full p-0.5 ${
+                  theme === 'light' ? 'bg-white' : 'bg-[#17212b]'
+                }`}
               >
-                {story.userAvatar ? (
-                  <img
-                    src={story.userAvatar}
-                    alt={story.userName}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span>{getInitials(story.userName)}</span>
-                )}
+                <div
+                  className={`w-full h-full rounded-full overflow-hidden flex items-center justify-center font-bold text-xs text-white bg-gradient-to-tr ${getAvatarGradient(
+                    story.userId
+                  )}`}
+                >
+                  {authorAvatar ? (
+                    <img
+                      src={authorAvatar}
+                      alt={authorName}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span>{getInitials(authorName)}</span>
+                  )}
+                </div>
               </div>
             </div>
+            <span className="text-[10px] font-medium opacity-80 truncate max-w-[56px] text-center">
+              {authorName.split(' ')[0]}
+            </span>
           </div>
-          <span className="text-[10px] font-medium opacity-80 truncate max-w-[56px] text-center">
-            {story.userName.split(' ')[0]}
-          </span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
-};
+});

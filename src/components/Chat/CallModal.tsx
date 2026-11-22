@@ -20,7 +20,7 @@ import {
 } from '../../utils/telegramHelpers';
 
 export const CallModal: React.FC = () => {
-  const { callState, endCall, toggleMute, toggleCamera } = useChat();
+  const { callState, endCall, toggleMute, toggleCamera, getChatDisplayInfo } = useChat();
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isSpeaker, setIsSpeaker] = useState(true);
@@ -58,6 +58,7 @@ export const CallModal: React.FC = () => {
   if (!callState.isActive || !callState.chat) return null;
 
   const chat = callState.chat;
+  const displayInfo = getChatDisplayInfo(chat);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 select-none animate-in fade-in duration-200">
@@ -69,7 +70,7 @@ export const CallModal: React.FC = () => {
       {/* Top Header: Title, Timer, and Encryption Emojis */}
       <div className="absolute top-5 inset-x-6 flex items-center justify-between text-white z-20">
         <div>
-          <h2 className="text-lg font-bold leading-tight">{chat.title}</h2>
+          <h2 className="text-lg font-bold leading-tight">{displayInfo.title}</h2>
           <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>
@@ -80,7 +81,7 @@ export const CallModal: React.FC = () => {
           </div>
         </div>
 
-        {/* Telegram Signature 4 Encryption Emojis */}
+        {/* Encryption Emojis */}
         <div className="flex flex-col items-end">
           <div className="flex items-center gap-1.5 p-1.5 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-base shadow-lg">
             {CALL_ENCRYPTION_EMOJIS.slice(0, 4).map((emoji, i) => (
@@ -103,7 +104,7 @@ export const CallModal: React.FC = () => {
             {/* Remote Simulated Video Feed */}
             <img
               src={
-                chat.photoURL ||
+                displayInfo.photoURL ||
                 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1200&q=80'
               }
               alt="Remote Video"
@@ -134,13 +135,13 @@ export const CallModal: React.FC = () => {
             <div className="relative mb-6">
               <div
                 className={`w-32 h-32 rounded-full flex items-center justify-center font-bold text-4xl text-white shadow-2xl overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
-                  chat.id
+                  displayInfo.otherUser?.uid || chat.id
                 )} relative z-10`}
               >
-                {chat.photoURL ? (
-                  <img src={chat.photoURL} alt="" className="w-full h-full object-cover" />
+                {displayInfo.photoURL ? (
+                  <img src={displayInfo.photoURL} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  <span>{getInitials(chat.title)}</span>
+                  <span>{getInitials(displayInfo.title)}</span>
                 )}
               </div>
 

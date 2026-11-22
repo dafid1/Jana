@@ -1,17 +1,23 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   collection,
   doc,
   addDoc,
   setDoc,
+  getDoc,
+  getDocs,
   updateDoc,
   deleteDoc,
   onSnapshot,
   query,
   orderBy,
+  limit,
   where,
+  arrayUnion,
+  writeBatch,
+  increment,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase/config';
+import { db, handleFirestoreError, isChatAccessibleOnServer, OperationType } from '../firebase/config';
 import { useAuth } from './AuthContext';
 import {
   Chat,
@@ -21,9 +27,33 @@ import {
   MessageType,
   Story,
   CallState,
+  UserProfile,
+  GroupInvite,
+  UserStickerDoc,
 } from '../types/telegram';
-import { tgAudio } from '../utils/telegramHelpers';
-import confetti from 'canvas-confetti';
+import {
+  tgAudio,
+  generateInviteCode,
+  extractInviteCode,
+  isUserOnlineByLastSeen,
+  formatLastSeenArabic,
+  getMessageReplyPreview,
+  compressImageFile,
+} from '../utils/telegramHelpers';
+
+const fireConfetti = (opts: { particleCount: number; spread: number; origin?: { y: number } }) => {
+  import('canvas-confetti')
+    .then((mod) => mod.default(opts))
+    .catch(() => {});
+};
+
+interface ChatDisplayInfo {
+  title: string;
+  photoURL?: string;
+  isOnline: boolean;
+  subtitle: string;
+  otherUser?: UserProfile;
+}
 
 interface ChatContextType {
   chats: Chat[];
@@ -37,6 +67,8 @@ interface ChatContextType {
   setFilter: (f: FolderFilter) => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  messageSearchMatches: Record<string, Message>;
+  isSearchingMessages: boolean;
   replyingTo: Message | null;
   setReplyingTo: (m: Message | null) => void;
   editingMessage: Message | null;
@@ -46,7 +78,8 @@ interface ChatContextType {
   activeMediaUrl: string | null;
   setActiveMediaUrl: (url: string | null) => void;
   stories: Story[];
-  addStory: (mediaUrl: string, caption?: string) => void;
+  addStory: (mediaUrl: string, caption?: string) => Promise<void>;
+  markStoryViewed: (storyId: string) => Promise<void>;
   activeStoryIndex: number | null;
   setActiveStoryIndex: (idx: number | null) => void;
   callState: CallState;
@@ -55,21 +88,44 @@ interface ChatContextType {
   toggleMute: () => void;
   toggleCamera: () => void;
   typingStatus: string | null;
+  updateTypingStatus: (isTyping: boolean, targetChatId?: string) => Promise<void>;
+  getChatDisplayInfo: (chat: Chat) => ChatDisplayInfo;
+  startDirectChat: (targetUser: UserProfile) => Promise<string>;
+  createGroup: (data: {
+    title: string;
+    description?: string;
+    photoURL?: string;
+    memberIds: string[];
+  }) => Promise<string>;
+  addMembersToGroup: (chatId: string, newMemberIds: string[]) => Promise<void>;
+  joinGroupByInvite: (codeOrLink: string) => Promise<Chat>;
   sendMessage: (text: string, type?: MessageType, extra?: Partial<Message>) => Promise<void>;
   editMessageText: (messageId: string, newText: string) => Promise<void>;
   toggleReaction: (messageId: string, emoji: string) => Promise<void>;
   pinMessage: (messageId: string, isPinned: boolean) => Promise<void>;
-  deleteMessage: (messageId: string) => Promise<void>;
   createChat: (chatData: Omit<Chat, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => Promise<string>;
   voteInPoll: (messageId: string, optionId: string) => Promise<void>;
   sendDiceRoll: (emoji?: string) => Promise<void>;
+  userStickers: UserStickerDoc[];
+  sendStickerMessage: (sticker: {
+    id: string;
+    emoji: string;
+    name: string;
+    label: string;
+    url: string;
+    isCustom?: boolean;
+  }) => Promise<void>;
+  saveCustomSticker: (file: File, label?: string, emoji?: string) => Promise<UserStickerDoc>;
+  deleteCustomSticker: (stickerId: string) => Promise<void>;
   pinnedMessage: Message | null;
+  pendingInviteStatus: { message: string; type: 'success' | 'error' } | null;
+  clearPendingInviteStatus: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | null>(null);
 
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, userProfile } = useAuth();
+  const { currentUser, userProfile, usersMap } = useAuth();
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -77,46 +133,36 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [filter, setFilter] = useState<FolderFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [messageSearchMatches, setMessageSearchMatches] = useState<Record<string, Message>>({});
+  const [isSearchingMessages, setIsSearchingMessages] = useState(false);
+  const [replyingTo, setReplyingToState] = useState<Message | null>(null);
+  const [editingMessage, setEditingMessageState] = useState<Message | null>(null);
+
+  const setReplyingTo = useCallback((msg: Message | null) => {
+    setReplyingToState(msg);
+    if (msg) {
+      setEditingMessageState(null);
+    }
+  }, []);
+
+  const setEditingMessage = useCallback((msg: Message | null) => {
+    setEditingMessageState(msg);
+    if (msg) {
+      setReplyingToState(null);
+    }
+  }, []);
   const [showInfoDrawer, setShowInfoDrawer] = useState(false);
   const [activeMediaUrl, setActiveMediaUrl] = useState<string | null>(null);
-  const [typingStatus, setTypingStatus] = useState<string | null>(null);
+  const [typingStatus] = useState<string | null>(null);
+  const [pendingInviteStatus, setPendingInviteStatus] = useState<{
+    message: string;
+    type: 'success' | 'error';
+  } | null>(null);
 
-  // Stories
-  const [stories, setStories] = useState<Story[]>([
-    {
-      id: 'story_official',
-      userId: 'telegram_official',
-      userName: 'Telegram News',
-      userAvatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
-      mediaUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80',
-      caption: '🚀 تحديث تيليجرام الجديد: مكالمات فيديو مشفرة، استطلاعات تفاعلية وقصص Telegram Stories!',
-      createdAt: new Date().toISOString(),
-      viewsCount: 14820,
-    },
-    {
-      id: 'story_tech',
-      userId: 'dev_sara',
-      userName: 'سارة المهندس',
-      userAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-      mediaUrl: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=800&q=80',
-      caption: 'جلسة برمجة مسائية مع كوب قهوة وشاشة الكود ☕️💻',
-      createdAt: new Date(Date.now() - 3600000).toISOString(),
-      viewsCount: 342,
-    },
-    {
-      id: 'story_omar',
-      userId: 'omar_dev',
-      userName: 'عمر التميمي',
-      userAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-      mediaUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80',
-      caption: 'إجازة نهاية الأسبوع في الطبيعة الساحرة 🌲🏔',
-      createdAt: new Date(Date.now() - 7200000).toISOString(),
-      viewsCount: 219,
-    },
-  ]);
+  // Cloud Stories & Stickers
+  const [stories, setStories] = useState<Story[]>([]);
   const [activeStoryIndex, setActiveStoryIndex] = useState<number | null>(null);
+  const [userStickers, setUserStickers] = useState<UserStickerDoc[]>([]);
 
   // Call State
   const [callState, setCallState] = useState<CallState>({
@@ -130,24 +176,108 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const seededRef = useRef<string | null>(null);
+  const chatsRef = useRef<Chat[]>([]);
+  chatsRef.current = chats;
+  const cachedChatMessagesRef = useRef<Map<string, { updatedAt: string; items: Message[] }>>(
+    new Map()
+  );
 
-  // Active chat object
-  const activeChat = chats.find((c) => c.id === activeChatId) || null;
-  const pinnedMessage = messages.find((m) => m.isPinned) || null;
+  const activeChat = useMemo(
+    () => chats.find((c) => c.id === activeChatId) || null,
+    [chats, activeChatId]
+  );
+  const pinnedMessage = useMemo(
+    () => messages.find((m) => m.isPinned) || null,
+    [messages]
+  );
 
-  // Add Story
-  const addStory = (mediaUrl: string, caption = '') => {
-    const newStory: Story = {
-      id: `story_${Date.now()}`,
-      userId: currentUser?.uid || 'me',
-      userName: userProfile?.displayName || 'قصتي',
-      userAvatar: userProfile?.photoURL,
-      mediaUrl,
-      caption,
-      createdAt: new Date().toISOString(),
-      viewsCount: 1,
+  const clearPendingInviteStatus = useCallback(() => setPendingInviteStatus(null), []);
+
+  // Resolve display name/avatar dynamically (especially for 1-on-1 direct chats!)
+  const getChatDisplayInfo = useCallback((chat: Chat): ChatDisplayInfo => {
+    if (chat.type === 'direct' && currentUser) {
+      const otherUid = chat.memberIds.find((id) => id !== currentUser.uid);
+      const otherUser = otherUid ? usersMap[otherUid] : undefined;
+      if (otherUser) {
+        const online = isUserOnlineByLastSeen(otherUser);
+        const lastSeenText = formatLastSeenArabic(otherUser.lastSeen);
+        return {
+          title: otherUser.displayName || otherUser.username,
+          photoURL: otherUser.photoURL,
+          isOnline: online,
+          subtitle: online
+            ? 'متصل'
+            : lastSeenText
+            ? `غير متصل • آخر ظهور ${lastSeenText}`
+            : 'غير متصل',
+          otherUser,
+        };
+      }
+      return {
+        title: chat.title,
+        photoURL: chat.photoURL,
+        isOnline: false,
+        subtitle: 'محادثة خاصة',
+      };
+    }
+
+    if (chat.type === 'saved') {
+      return {
+        title: 'الرسائل المحفوظة',
+        photoURL: undefined,
+        isOnline: false,
+        subtitle: 'سحابتك الشخصية للرسائل والملفات',
+      };
+    }
+
+    if (chat.type === 'channel') {
+      return {
+        title: chat.title,
+        photoURL: chat.photoURL,
+        isOnline: false,
+        subtitle: `${chat.membersCount || chat.memberIds?.length || 1} مشترك`,
+      };
+    }
+
+    return {
+      title: chat.title,
+      photoURL: chat.photoURL,
+      isOnline: false,
+      subtitle: `${chat.memberIds?.length || chat.membersCount || 1} أعضاء`,
     };
-    setStories((prev) => [newStory, ...prev]);
+  }, [currentUser, usersMap]);
+
+  // Add Cloud Story
+  const addStory = async (mediaUrl: string, caption = '') => {
+    if (!currentUser) return;
+    try {
+      const storyRef = doc(collection(db, 'stories'));
+      const newStory: Story = {
+        id: storyRef.id,
+        userId: currentUser.uid,
+        userName: userProfile?.displayName || userProfile?.username || 'مستخدم',
+        userAvatar: userProfile?.photoURL || '',
+        mediaUrl,
+        caption,
+        viewedBy: [currentUser.uid],
+        createdAt: new Date().toISOString(),
+      };
+      await setDoc(storyRef, newStory);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'stories');
+    }
+  };
+
+  const markStoryViewed = async (storyId: string) => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, 'stories', storyId), {
+        viewedBy: arrayUnion(currentUser.uid),
+      }).catch(() => {});
+    } catch {
+      // Ignore
+    }
   };
 
   // Call handlers
@@ -163,18 +293,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       chat,
     });
 
-    // Simulate answering after 3.5 seconds
     setTimeout(() => {
       tgAudio.stopCallingTone();
       tgAudio.playPopSound();
       setCallState((prev) => ({ ...prev, status: 'connected' }));
 
-      // Duration counter
       if (callTimerRef.current) clearInterval(callTimerRef.current);
       callTimerRef.current = setInterval(() => {
         setCallState((prev) => ({ ...prev, duration: prev.duration + 1 }));
       }, 1000);
-    }, 3500);
+    }, 2500);
   };
 
   const endCall = () => {
@@ -191,173 +319,62 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isCameraOff: false,
         chat: null,
       });
-    }, 800);
+    }, 600);
   };
 
-  const toggleMute = () => {
-    setCallState((prev) => ({ ...prev, isMuted: !prev.isMuted }));
-  };
+  const toggleMute = () => setCallState((prev) => ({ ...prev, isMuted: !prev.isMuted }));
+  const toggleCamera = () => setCallState((prev) => ({ ...prev, isCameraOff: !prev.isCameraOff }));
 
-  const toggleCamera = () => {
-    setCallState((prev) => ({ ...prev, isCameraOff: !prev.isCameraOff }));
-  };
-
-  // Pre-seed default chats for new user
-  const seedDefaultChats = async (userId: string, userName: string) => {
+  // Create personal Saved Messages cloud space on first login (no fake chats)
+  const ensureSavedMessagesChat = async (userId: string, userName: string) => {
+    if (seededRef.current === userId) return;
+    seededRef.current = userId;
     try {
-      // 1. Saved messages
       const savedChatId = `saved_${userId}`;
-      await setDoc(doc(db, 'chats', savedChatId), {
+      const savedRef = doc(db, 'chats', savedChatId);
+      const snap = await getDoc(savedRef);
+      if (snap.exists()) return;
+
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      batch.set(savedRef, {
         id: savedChatId,
         type: 'saved',
         title: 'الرسائل المحفوظة',
         avatarColor: '#2481cc',
-        description: 'مساحتك السحابية الخاصة لحفظ الملاحظات والصور والروابط والملفات للوصول إليها من أي جهاز.',
+        description: 'مساحتك السحابية الخاصة لحفظ الملاحظات والصور والروابط والملفات.',
         createdBy: userId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
         memberIds: [userId],
         membersCount: 1,
         isPinned: true,
+        unreadCounts: { [userId]: 0 },
         lastMessage: {
-          text: 'أهلاً بك في سحابة الرسائل المحفوظة! يمكنك تخزين أي نص أو ملف هنا.',
+          text: 'أهلاً بك في سحابة JanaX للرسائل المحفوظة!',
           senderId: userId,
           senderName: userName,
-          createdAt: new Date().toISOString(),
+          createdAt: now,
           type: 'text',
+          readBy: [userId],
         },
       });
 
-      await addDoc(collection(db, 'chats', savedChatId, 'messages'), {
+      const welcomeMsgRef = doc(collection(db, 'chats', savedChatId, 'messages'));
+      batch.set(welcomeMsgRef, {
         chatId: savedChatId,
         senderId: userId,
         senderName: userName,
-        text: 'أهلاً بك في سحابة الرسائل المحفوظة! يمكنك إرسال نصوص وصور وملاحظات صوتية هنا لتخزينها.',
+        text: 'أهلاً بك في سحابة JanaX للرسائل المحفوظة! يمكنك تخزين ملاحظاتك وملفاتك هنا بأمان.',
         type: 'text',
-        createdAt: new Date().toISOString(),
+        readBy: [userId],
+        createdAt: now,
       });
 
-      // 2. Official Telegram News Channel
-      const newsChannelId = `news_${userId}`;
-      await setDoc(doc(db, 'chats', newsChannelId), {
-        id: newsChannelId,
-        type: 'channel',
-        title: 'قناة تيليجرام الرسمية 📢',
-        photoURL: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
-        avatarColor: '#2AABEE',
-        description: 'القناة الرسمية لأخبار تيليجرام والتحديثات والميزات الجديدة.',
-        createdBy: userId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        memberIds: [userId],
-        membersCount: 1420500,
-        isPinned: false,
-        lastMessage: {
-          text: '🚀 تم إطلاق الإصدار الجديد من تيليجرام ويب بتصميم متكامل وقاعدة بيانات سحابية سريعة!',
-          senderId: userId,
-          senderName: 'تيليجرام',
-          createdAt: new Date().toISOString(),
-          type: 'text',
-        },
-      });
-
-      await addDoc(collection(db, 'chats', newsChannelId, 'messages'), {
-        chatId: newsChannelId,
-        senderId: userId,
-        senderName: 'تيليجرام',
-        text: '🚀 تم إطلاق تطبيق تيليجرام ويب فائق السرعة! يتضمن الميزات التالية:\n• محادثات فورية فردية وجماعية وقنوات عامة\n• إرسال ملاحظات صوتية وصور وملفات وملصقات\n• إنشاء استطلاعات رأي تفاعلية مباشرة (Polls)\n• مكالمات فيديو وصوتية مشفرة\n• قصص تيليجرام (Telegram Stories)\n• التفاعل بالرموز التعبيرية وتثبيت الرسائل وتعديلها.',
-        type: 'text',
-        isPinned: true,
-        reactions: { '🔥': [userId], '❤️': [userId] },
-        createdAt: new Date().toISOString(),
-      });
-
-      // 3. Developers Community Group
-      const devGroupId = `devs_${userId}`;
-      await setDoc(doc(db, 'chats', devGroupId), {
-        id: devGroupId,
-        type: 'group',
-        title: 'مجتمع مطوري البرمجيات 💻',
-        photoURL: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=400&q=80',
-        avatarColor: '#41a76c',
-        description: 'مجموعة نقاش مفتوحة للمطورين والمصممين حول أحدث التقنيات وأفضل الممارسات.',
-        createdBy: userId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        memberIds: [userId],
-        membersCount: 582,
-        isPinned: false,
-        lastMessage: {
-          text: 'سارة: ما رأيكم في أداء وتصميم تيليجرام الجديد؟',
-          senderId: userId,
-          senderName: 'سارة المهندس',
-          createdAt: new Date().toISOString(),
-          type: 'text',
-        },
-      });
-
-      await addDoc(collection(db, 'chats', devGroupId, 'messages'), {
-        chatId: devGroupId,
-        senderId: userId,
-        senderName: 'مشرف المجموعة',
-        text: 'مرحباً بجميع الأعضاء الجدد في مجتمع المطورين! نرجو الالتزام بقواعد الاحترام ومشاركة الخبرات.',
-        type: 'text',
-        createdAt: new Date(Date.now() - 3600000).toISOString(),
-      });
-
-      await addDoc(collection(db, 'chats', devGroupId, 'messages'), {
-        chatId: devGroupId,
-        senderId: userId,
-        senderName: 'سارة المهندس',
-        text: 'ما رأيكم في أداء وتصميم تيليجرام الجديد؟ تجربة الاستخدام سريعة وسلسة جداً!',
-        type: 'text',
-        reactions: { '👍': [userId], '❤️': [userId] },
-        createdAt: new Date().toISOString(),
-      });
-
-      // 4. Interactive Assistant Bot
-      const botChatId = `bot_${userId}`;
-      await setDoc(doc(db, 'chats', botChatId), {
-        id: botChatId,
-        type: 'direct',
-        title: 'المساعد الآلي (Telegram Bot) 🤖',
-        avatarColor: '#8c5fd1',
-        description: 'بوت تيليجرام التفاعلي الذكي، اكتب /help لعرض الأوامر المتاحة أو تحدث معي مباشرة!',
-        createdBy: userId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        memberIds: [userId],
-        membersCount: 2,
-        isPinned: true,
-        lastMessage: {
-          text: 'مرحباً بك! أنا بوت تيليجرام الذكي. اكتب /help أو اضغط على الأزرار أدناه.',
-          senderId: userId,
-          senderName: 'Telegram Bot',
-          createdAt: new Date().toISOString(),
-          type: 'text',
-        },
-      });
-
-      await addDoc(collection(db, 'chats', botChatId, 'messages'), {
-        chatId: botChatId,
-        senderId: userId,
-        senderName: 'Telegram Bot',
-        text: 'مرحباً بك يا صديقي! أنا مساعدك الذكي في تيليجرام 🤖\n\nاختر أمراً أو اكتبه في الدردشة:',
-        type: 'text',
-        inlineButtons: [
-          [
-            { text: '⏰ الوقت الآن', data: '/time' },
-            { text: '🎲 رمي نرد', data: '/dice' },
-          ],
-          [
-            { text: '😂 نكتة برمجية', data: '/joke' },
-            { text: '💡 معلومة تقنية', data: '/fact' },
-          ],
-        ],
-        createdAt: new Date().toISOString(),
-      });
+      await batch.commit();
     } catch (err) {
-      console.error('Error seeding default chats:', err);
+      seededRef.current = null;
+      handleFirestoreError(err, OperationType.WRITE, `chats/saved_${userId}`);
     }
   };
 
@@ -366,7 +383,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!currentUser) {
       setChats([]);
       setActiveChatId(null);
+      setMessages([]);
+      setSearchQuery('');
+      setReplyingToState(null);
+      setEditingMessageState(null);
+      cachedChatMessagesRef.current.clear();
       setLoadingChats(false);
+      seededRef.current = null;
       return;
     }
 
@@ -382,13 +405,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const loadedChats: Chat[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as Chat;
+          const myUnread = data.unreadCounts?.[currentUser.uid] || 0;
           loadedChats.push({
             ...data,
             id: docSnap.id,
+            unreadCount: myUnread,
           });
         });
 
-        // Sort by updatedAt descending
         loadedChats.sort((a, b) => {
           if (a.isPinned && !b.isPinned) return -1;
           if (!a.isPinned && b.isPinned) return 1;
@@ -396,12 +420,17 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         if (loadedChats.length === 0) {
-          await seedDefaultChats(currentUser.uid, userProfile?.displayName || 'أنا');
+          setChats([]);
+          setActiveChatId(null);
+          await ensureSavedMessagesChat(
+            currentUser.uid,
+            userProfile?.displayName || userProfile?.username || 'أنا'
+          );
         } else {
           setChats(loadedChats);
-          if (!activeChatId && loadedChats.length > 0) {
-            setActiveChatId(loadedChats[0].id);
-          }
+          setActiveChatId((prev) =>
+            prev && loadedChats.some((c) => c.id === prev) ? prev : null
+          );
         }
         setLoadingChats(false);
       },
@@ -414,62 +443,547 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Real-time listen to messages of active chat
+  // Real-time listen to cloud stories
   useEffect(() => {
-    if (!currentUser || !activeChatId) {
-      setMessages([]);
+    if (!currentUser) {
+      setStories([]);
       return;
     }
 
-    setLoadingMessages(true);
-    const messagesRef = collection(db, 'chats', activeChatId, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
-
+    const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const loadedMsgs: Message[] = [];
+        const list: Story[] = [];
         snapshot.forEach((docSnap) => {
-          loadedMsgs.push({
-            id: docSnap.id,
-            ...(docSnap.data() as Omit<Message, 'id'>),
-          });
+          list.push({ ...(docSnap.data() as Story), id: docSnap.id });
         });
-        setMessages(loadedMsgs);
-        setLoadingMessages(false);
+        setStories(list);
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, `chats/${activeChatId}/messages`);
-        setLoadingMessages(false);
+        handleFirestoreError(error, OperationType.GET, 'stories');
       }
     );
 
     return () => unsubscribe();
-  }, [currentUser, activeChatId]);
+  }, [currentUser]);
 
-  // Send message
+  // Real-time listen to personal & recent stickers in Firestore
+  useEffect(() => {
+    if (!currentUser) {
+      setUserStickers([]);
+      return;
+    }
+
+    const stickersPath = `users/${currentUser.uid}/stickers`;
+    const q = query(
+      collection(db, 'users', currentUser.uid, 'stickers'),
+      orderBy('lastUsedAt', 'desc'),
+      limit(60)
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: UserStickerDoc[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ ...(docSnap.data() as UserStickerDoc), id: docSnap.id });
+        });
+        setUserStickers(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, stickersPath);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Handle ?join=INVITE_CODE URL parameter automatically after login
+  useEffect(() => {
+    if (!currentUser) return;
+    const params = new URLSearchParams(window.location.search);
+    const joinCode = params.get('join');
+    if (joinCode) {
+      // Remove query param from URL cleanly
+      const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+
+      joinGroupByInvite(joinCode)
+        .then((joinedChat) => {
+          setPendingInviteStatus({
+            message: `تم انضمامك إلى مجموعة "${joinedChat.title}" بنجاح!`,
+            type: 'success',
+          });
+        })
+        .catch((err: unknown) => {
+          setPendingInviteStatus({
+            message: err instanceof Error ? err.message : 'رابط الدعوة غير صالح أو منتهي',
+            type: 'error',
+          });
+        });
+    }
+  }, [currentUser]);
+
+  const canListenActiveChatMessages = Boolean(
+    currentUser &&
+      activeChat &&
+      (activeChat.id === `saved_${currentUser.uid}` ||
+        activeChat.type === 'saved' ||
+        activeChat.type === 'channel' ||
+        activeChat.createdBy === currentUser.uid ||
+        (Array.isArray(activeChat.memberIds) && activeChat.memberIds.includes(currentUser.uid)))
+  );
+
+  // Real-time listen to messages of active chat + REAL Read Receipts marking
+  useEffect(() => {
+    if (!currentUser || !activeChatId || !canListenActiveChatMessages) {
+      setMessages([]);
+      setLoadingMessages(false);
+      return;
+    }
+
+    let cancelled = false;
+    const chatId = activeChatId;
+    setLoadingMessages(true);
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+
+    const unsubscribe = onSnapshot(
+      q,
+      async (snapshot) => {
+        if (cancelled) return;
+        const loadedMsgs: Message[] = [];
+        const unreadMessageIds: string[] = [];
+
+        snapshot.forEach((docSnap) => {
+          const msgData = docSnap.data() as Omit<Message, 'id'>;
+          const msg: Message = {
+            id: docSnap.id,
+            ...msgData,
+          };
+          loadedMsgs.push(msg);
+
+          if (
+            msg.senderId !== currentUser.uid &&
+            !(msg.readBy || []).includes(currentUser.uid)
+          ) {
+            unreadMessageIds.push(docSnap.id);
+          }
+        });
+
+        setMessages(loadedMsgs);
+        setLoadingMessages(false);
+
+        const activeChatSummary = chatsRef.current.find((c) => c.id === chatId);
+        cachedChatMessagesRef.current.set(chatId, {
+          updatedAt: activeChatSummary?.updatedAt || '',
+          items: [...loadedMsgs].reverse(),
+        });
+
+        // Real read receipt persistence to Firestore!
+        if (unreadMessageIds.length > 0) {
+          try {
+            const batch = writeBatch(db);
+            unreadMessageIds.forEach((msgId) => {
+              const mRef = doc(db, 'chats', chatId, 'messages', msgId);
+              batch.update(mRef, { readBy: arrayUnion(currentUser.uid) });
+            });
+            await batch.commit();
+          } catch (err) {
+            console.warn('Could not mark some messages read:', err);
+          }
+        }
+
+        // Reset unread count & update lastMessage.readBy on Chat doc
+        const currentChat = chatsRef.current.find((c) => c.id === chatId);
+        const hasUnreadBadge = (currentChat?.unreadCounts?.[currentUser.uid] || 0) > 0;
+        const lastReadByMissing =
+          currentChat?.lastMessage &&
+          currentChat.lastMessage.senderId !== currentUser.uid &&
+          !(currentChat.lastMessage.readBy || []).includes(currentUser.uid);
+
+        if (hasUnreadBadge || lastReadByMissing) {
+          updateDoc(doc(db, 'chats', chatId), {
+            [`unreadCounts.${currentUser.uid}`]: 0,
+            'lastMessage.readBy': arrayUnion(currentUser.uid),
+          }).catch(() => {});
+        }
+      },
+      async (error) => {
+        const fbCode = (error as { code?: string })?.code;
+        if (fbCode === 'permission-denied') {
+          const accessible = await isChatAccessibleOnServer(chatId, currentUser.uid);
+          if (!accessible) {
+            if (!cancelled) {
+              setChats((prev) => prev.filter((c) => c.id !== chatId));
+              setActiveChatId((prev) => (prev === chatId ? null : prev));
+              setMessages([]);
+              setLoadingMessages(false);
+            }
+            return;
+          }
+        }
+        handleFirestoreError(error, OperationType.GET, `chats/${chatId}/messages`);
+        setLoadingMessages(false);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [currentUser, activeChatId, canListenActiveChatMessages]);
+
+  // Real-time search across message content of all user chats (cached + Firestore)
+  useEffect(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+    if (!currentUser || !trimmed) {
+      setMessageSearchMatches({});
+      setIsSearchingMessages(false);
+      return;
+    }
+
+    const findMatchInMessages = (items: Message[], term: string): Message | undefined => {
+      return items.find((m) => {
+        const text = (m.text || '').toLowerCase();
+        const mediaName = (m.mediaName || '').toLowerCase();
+        const pollQ = (m.pollData?.question || '').toLowerCase();
+        return text.includes(term) || mediaName.includes(term) || pollQ.includes(term);
+      });
+    };
+
+    const computeMatchesFromCache = (): Record<string, Message> => {
+      const next: Record<string, Message> = {};
+      chatsRef.current.forEach((chat) => {
+        const cached = cachedChatMessagesRef.current.get(chat.id);
+        if (cached) {
+          const hit = findMatchInMessages(cached.items, trimmed);
+          if (hit) next[chat.id] = hit;
+        }
+      });
+      return next;
+    };
+
+    // Instant match from cached/loaded messages
+    setMessageSearchMatches(computeMatchesFromCache());
+
+    let cancelled = false;
+    const chatsNeedingFetch = chats.filter((chat) => {
+      const cached = cachedChatMessagesRef.current.get(chat.id);
+      return !cached || cached.updatedAt !== (chat.updatedAt || '');
+    });
+
+    if (chatsNeedingFetch.length === 0) {
+      setIsSearchingMessages(false);
+      return;
+    }
+
+    setIsSearchingMessages(true);
+    const timer = setTimeout(async () => {
+      try {
+        await Promise.all(
+          chatsNeedingFetch.map(async (chat) => {
+            try {
+              const q = query(
+                collection(db, 'chats', chat.id, 'messages'),
+                orderBy('createdAt', 'desc'),
+                limit(100)
+              );
+              const snap = await getDocs(q);
+              const loaded: Message[] = [];
+              snap.forEach((docSnap) => {
+                loaded.push({ id: docSnap.id, ...(docSnap.data() as Omit<Message, 'id'>) });
+              });
+              cachedChatMessagesRef.current.set(chat.id, {
+                updatedAt: chat.updatedAt || '',
+                items: loaded,
+              });
+            } catch (err) {
+              const fbCode = (err as { code?: string })?.code;
+              if (fbCode === 'permission-denied') {
+                const accessible = await isChatAccessibleOnServer(chat.id, currentUser.uid);
+                if (!accessible) {
+                  if (!cancelled) {
+                    setChats((prev) => prev.filter((c) => c.id !== chat.id));
+                  }
+                  return;
+                }
+              }
+              handleFirestoreError(err, OperationType.LIST, `chats/${chat.id}/messages`);
+            }
+          })
+        );
+        if (!cancelled) {
+          setMessageSearchMatches(computeMatchesFromCache());
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearchingMessages(false);
+        }
+      }
+    }, 160);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, chats, currentUser]);
+
+  // Start or open existing 1-on-1 Direct Chat with another real user
+  const startDirectChat = async (targetUser: UserProfile): Promise<string> => {
+    if (!currentUser) throw new Error('غير مسجل');
+    const dmId = `dm_${[currentUser.uid, targetUser.uid].sort().join('_')}`;
+
+    const existingLocal = chats.find((c) => c.id === dmId);
+    if (existingLocal) {
+      setActiveChatId(dmId);
+      return dmId;
+    }
+
+    const dmRef = doc(db, 'chats', dmId);
+    try {
+      const snap = await getDoc(dmRef);
+      if (!snap.exists()) {
+        const now = new Date().toISOString();
+        const newChat: Chat = {
+          id: dmId,
+          type: 'direct',
+          title: targetUser.displayName || targetUser.username,
+          photoURL: targetUser.photoURL || '',
+          avatarColor: '#2481cc',
+          description: targetUser.bio || '',
+          createdBy: currentUser.uid,
+          createdAt: now,
+          updatedAt: now,
+          memberIds: [currentUser.uid, targetUser.uid],
+          membersCount: 2,
+          unreadCounts: { [currentUser.uid]: 0, [targetUser.uid]: 0 },
+          lastMessage: {
+            text: 'تم بدء المحادثة الخاصة',
+            senderId: currentUser.uid,
+            senderName: userProfile?.displayName || 'مستخدم',
+            createdAt: now,
+            type: 'text',
+            readBy: [currentUser.uid],
+          },
+        };
+        await setDoc(dmRef, newChat);
+      }
+      setActiveChatId(dmId);
+      return dmId;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `chats/${dmId}`);
+      throw error;
+    }
+  };
+
+  // Create Group with selected members & generate shareable invite link
+  const createGroup = async (data: {
+    title: string;
+    description?: string;
+    photoURL?: string;
+    memberIds: string[];
+  }): Promise<string> => {
+    if (!currentUser) throw new Error('غير مسجل');
+
+    const chatDocRef = doc(collection(db, 'chats'));
+    const inviteCode = generateInviteCode();
+    const uniqueMembers = Array.from(new Set([currentUser.uid, ...data.memberIds]));
+    const now = new Date().toISOString();
+
+    const unreadCounts: Record<string, number> = {};
+    uniqueMembers.forEach((uid) => {
+      unreadCounts[uid] = uid === currentUser.uid ? 0 : 1;
+    });
+
+    const newGroup: Chat = {
+      id: chatDocRef.id,
+      type: 'group',
+      title: data.title.trim(),
+      description: data.description?.trim() || 'مجموعة جديدة في JanaX',
+      photoURL: data.photoURL?.trim() || '',
+      avatarColor: '#41a76c',
+      inviteCode,
+      createdBy: currentUser.uid,
+      createdAt: now,
+      updatedAt: now,
+      memberIds: uniqueMembers,
+      membersCount: uniqueMembers.length,
+      unreadCounts,
+      lastMessage: {
+        text: `👥 أنشأ ${userProfile?.displayName || 'مستخدم'} المجموعة`,
+        senderId: currentUser.uid,
+        senderName: userProfile?.displayName || 'مستخدم',
+        createdAt: now,
+        type: 'text',
+        readBy: [currentUser.uid],
+      },
+    };
+
+    try {
+      const batch = writeBatch(db);
+      batch.set(chatDocRef, newGroup);
+
+      // Save invite lookup doc
+      const inviteDoc: GroupInvite = {
+        inviteCode,
+        chatId: chatDocRef.id,
+        title: newGroup.title,
+        description: newGroup.description,
+        photoURL: newGroup.photoURL,
+        createdBy: currentUser.uid,
+        createdAt: now,
+      };
+      batch.set(doc(db, 'groupInvites', inviteCode), inviteDoc);
+
+      const welcomeMsgRef = doc(collection(db, 'chats', chatDocRef.id, 'messages'));
+      batch.set(welcomeMsgRef, {
+        chatId: chatDocRef.id,
+        senderId: currentUser.uid,
+        senderName: userProfile?.displayName || 'مستخدم',
+        text: `👥 تم إنشاء مجموعة "${newGroup.title}" وإضافة ${uniqueMembers.length} أعضاء.`,
+        type: 'text',
+        readBy: [currentUser.uid],
+        createdAt: now,
+      });
+
+      await batch.commit();
+      setActiveChatId(chatDocRef.id);
+      return chatDocRef.id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'chats');
+      throw error;
+    }
+  };
+
+  // Add members directly to an existing group
+  const addMembersToGroup = async (chatId: string, newMemberIds: string[]) => {
+    if (!currentUser || newMemberIds.length === 0) return;
+    try {
+      const targetChat = chats.find((c) => c.id === chatId);
+      const merged = Array.from(new Set([...(targetChat?.memberIds || []), ...newMemberIds]));
+
+      await updateDoc(doc(db, 'chats', chatId), {
+        memberIds: arrayUnion(...newMemberIds),
+        membersCount: merged.length,
+        updatedAt: new Date().toISOString(),
+      });
+
+      const addedNames = newMemberIds
+        .map((id) => usersMap[id]?.displayName || usersMap[id]?.username || 'عضو')
+        .join('، ');
+
+      await addDoc(collection(db, 'chats', chatId, 'messages'), {
+        chatId,
+        senderId: currentUser.uid,
+        senderName: userProfile?.displayName || 'مستخدم',
+        text: `➕ قام ${userProfile?.displayName || 'عضو'} بإضافة: ${addedNames}`,
+        type: 'text',
+        readBy: [currentUser.uid],
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `chats/${chatId}`);
+    }
+  };
+
+  // Join Group via Invite Link or Invite Code
+  const joinGroupByInvite = async (codeOrLink: string): Promise<Chat> => {
+    if (!currentUser) throw new Error('يجب تسجيل الدخول أولاً');
+    const code = extractInviteCode(codeOrLink);
+    if (!code) throw new Error('الرجاء إدخال رابط أو رمز دعوة صحيح');
+
+    try {
+      const inviteSnap = await getDoc(doc(db, 'groupInvites', code));
+      if (!inviteSnap.exists()) {
+        throw new Error('رابط الدعوة غير موجود أو غير صحيح');
+      }
+
+      const invite = inviteSnap.data() as GroupInvite;
+      const chatRef = doc(db, 'chats', invite.chatId);
+      const chatSnap = await getDoc(chatRef);
+      if (!chatSnap.exists()) {
+        throw new Error('المجموعة لم تعد موجودة');
+      }
+
+      const chatData = chatSnap.data() as Chat;
+      if (!chatData.memberIds.includes(currentUser.uid)) {
+        const updatedCount = chatData.memberIds.length + 1;
+        await updateDoc(chatRef, {
+          memberIds: arrayUnion(currentUser.uid),
+          membersCount: updatedCount,
+          updatedAt: new Date().toISOString(),
+        });
+
+        await addDoc(collection(db, 'chats', invite.chatId, 'messages'), {
+          chatId: invite.chatId,
+          senderId: currentUser.uid,
+          senderName: userProfile?.displayName || 'مستخدم',
+          text: `🔗 انضم ${userProfile?.displayName || userProfile?.username} عبر رابط الدعوة`,
+          type: 'text',
+          readBy: [currentUser.uid],
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      setActiveChatId(invite.chatId);
+      return { ...chatData, id: invite.chatId };
+    } catch (error) {
+      if (error instanceof Error && !error.message.includes('Missing or insufficient permissions')) {
+        throw error;
+      }
+      handleFirestoreError(error, OperationType.UPDATE, `groupInvites/${code}`);
+      throw error;
+    }
+  };
+
+  // Update real-time typing status in Firestore
+  const updateTypingStatus = async (isTyping: boolean, targetChatId?: string) => {
+    const chatId = targetChatId || activeChatId;
+    if (!currentUser || !chatId) return;
+    const targetChat = chats.find((c) => c.id === chatId);
+    if (chatId.startsWith('saved_') || targetChat?.type === 'saved') return;
+
+    const typingRef = doc(db, 'chats', chatId, 'typing', currentUser.uid);
+    try {
+      const displayName = (userProfile?.displayName || userProfile?.username || 'مستخدم').slice(0, 100);
+      await setDoc(typingRef, {
+        uid: currentUser.uid,
+        displayName,
+        isTyping,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `chats/${chatId}/typing/${currentUser.uid}`);
+    }
+  };
+
+  // Send message (Persisted to Firestore with real readBy & unreadCounts)
   const sendMessage = async (text: string, type: MessageType = 'text', extra: Partial<Message> = {}) => {
-    if (!currentUser || !activeChatId) return;
+    if (!currentUser || !activeChatId || !activeChat) return;
     if (!text.trim() && type === 'text') return;
 
     try {
       const chatDocRef = doc(db, 'chats', activeChatId);
       const messagesRef = collection(db, 'chats', activeChatId, 'messages');
+      const now = new Date().toISOString();
 
       const newMsgData: Omit<Message, 'id'> = {
         chatId: activeChatId,
         senderId: currentUser.uid,
-        senderName: userProfile?.displayName || 'مستخدم',
+        senderName: userProfile?.displayName || userProfile?.username || 'مستخدم',
         senderPhoto: userProfile?.photoURL || '',
         senderColor: userProfile?.avatarColor || '#2481cc',
         text: text.trim(),
         type,
-        createdAt: new Date().toISOString(),
+        readBy: [currentUser.uid], // Only sender has read it so far -> Single Check ✓
+        createdAt: now,
         ...(replyingTo
           ? {
               replyToId: replyingTo.id,
-              replyToText: replyingTo.text.slice(0, 80),
-              replyToSender: replyingTo.senderName,
+              replyToText: getMessageReplyPreview(replyingTo).slice(0, 120),
+              replyToSender:
+                usersMap[replyingTo.senderId]?.displayName || replyingTo.senderName,
             }
           : {}),
         ...extra,
@@ -478,10 +992,20 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await addDoc(messagesRef, newMsgData);
       tgAudio.playSendSound();
       setReplyingTo(null);
+      updateTypingStatus(false, activeChatId).catch(() => {});
 
-      // Update chat's lastMessage
+      // Update chat's lastMessage & increment unreadCounts for other members
+      const unreadUpdates: Record<string, unknown> = {};
+      (activeChat.memberIds || []).forEach((uid) => {
+        if (uid !== currentUser.uid) {
+          unreadUpdates[`unreadCounts.${uid}`] = increment(1);
+        } else {
+          unreadUpdates[`unreadCounts.${uid}`] = 0;
+        }
+      });
+
       await updateDoc(chatDocRef, {
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
         lastMessage: {
           text:
             type === 'image'
@@ -492,75 +1016,127 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ? '📊 استطلاع رأي'
               : type === 'dice'
               ? '🎲 رمية نرد'
+              : type === 'file'
+              ? `📎 ${extra.mediaName || 'ملف'}`
+              : type === 'sticker'
+              ? extra.mediaName
+                ? `🎨 ملصق: ${extra.mediaName}`
+                : '🎨 ملصق'
               : text.trim(),
           senderId: currentUser.uid,
           senderName: userProfile?.displayName || 'مستخدم',
-          createdAt: new Date().toISOString(),
+          createdAt: now,
           type,
+          readBy: [currentUser.uid],
         },
+        ...unreadUpdates,
       });
-
-      // Interactive Telegram Bot Response Simulation
-      if (activeChat?.title.includes('Bot') || activeChat?.createdBy === 'system_bot') {
-        setTypingStatus('يكتب الآن...');
-        setTimeout(async () => {
-          let botReply = 'لقد استلمت رسالتك بنجاح! شكراً لتواصلك مع تيليجرام بوت.';
-          let inlineButtons: any = undefined;
-          const cleanText = text.trim().toLowerCase();
-
-          if (cleanText === '/start') {
-            botReply = 'أهلاً بك مجدداً! كيف يمكنني مساعدتك اليوم؟ اختر أمراً أدناه:';
-            inlineButtons = [
-              [{ text: '⏰ الوقت', data: '/time' }, { text: '🎲 رمي نرد', data: '/dice' }],
-              [{ text: '😂 نكتة', data: '/joke' }, { text: '💡 معلومة', data: '/fact' }],
-            ];
-          } else if (cleanText === '/help') {
-            botReply = 'الأوامر المتاحة:\n• /time - معرفة الوقت الحالي\n• /dice - رمي نرد عشوائي\n• /joke - نكتة سريعة\n• /fact - معلومة تقنية\n• /ping - فحص الاستجابة';
-          } else if (cleanText === '/time') {
-            botReply = `⏰ الوقت الحالي بتوقيتك هو: ${new Date().toLocaleTimeString('ar-SA')}`;
-          } else if (cleanText === '/ping') {
-            botReply = '🏓 Pong! وقت الاستجابة 14ms عبر شبكة تيليجرام السحابية.';
-          } else if (cleanText === '/dice') {
-            const val = Math.floor(Math.random() * 6) + 1;
-            botReply = `🎲 نتيجتك في رمي النرد هي: ${val} !`;
-          } else if (cleanText === '/joke') {
-            const jokes = [
-              'لماذا يفضل المبرمجون شرب القهوة في الظلام؟ لأن النور يجذب الـ Bugs! 😂',
-              'سألوا المبرمج: كيف حال أولادك؟ قال: كلهم شغالين تمام بدون Errors! 💻',
-              'المبرمج لا ينام، هو فقط يدخل في وضع Background Task! 😴',
-            ];
-            botReply = jokes[Math.floor(Math.random() * jokes.length)];
-          } else if (cleanText === '/fact') {
-            botReply = '💡 هل تعلم؟ تيليجرام يتيح إرسال ملفات بأحجام تصل إلى 2GB ومزامنتها لحظياً بدون فقدان جودة.';
-          }
-
-          setTypingStatus(null);
-          await addDoc(messagesRef, {
-            chatId: activeChatId,
-            senderId: 'system_bot',
-            senderName: 'Telegram Bot',
-            text: botReply,
-            type: 'text',
-            inlineButtons,
-            createdAt: new Date().toISOString(),
-          });
-
-          await updateDoc(chatDocRef, {
-            updatedAt: new Date().toISOString(),
-            lastMessage: {
-              text: botReply,
-              senderId: 'system_bot',
-              senderName: 'Telegram Bot',
-              createdAt: new Date().toISOString(),
-              type: 'text',
-            },
-          });
-
-          tgAudio.playReceiveSound();
-        }, 1200);
-      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `chats/${activeChatId}/messages`);
+    }
+  };
+
+  // Send sticker to active chat & track recent usage in Firestore
+  const sendStickerMessage = async (sticker: {
+    id: string;
+    emoji: string;
+    name: string;
+    label: string;
+    url: string;
+    isCustom?: boolean;
+  }) => {
+    if (!currentUser || !activeChatId || !activeChat) return;
+
+    const cleanEmoji = (sticker.emoji || '🎨').slice(0, 16);
+    const cleanLabel = (sticker.label || sticker.name || 'ملصق').slice(0, 80);
+    const cleanName = (sticker.name || cleanLabel).slice(0, 80);
+    const cleanUrl = (sticker.url || '').slice(0, 350000);
+
+    await sendMessage(cleanEmoji, 'sticker', {
+      mediaUrl: cleanUrl,
+      mediaName: cleanLabel,
+    });
+
+    const sanitizedId =
+      (sticker.id || `stk_${Date.now()}`)
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 128) || `stk_${Date.now()}`;
+
+    const stickerDocPath = `users/${currentUser.uid}/stickers/${sanitizedId}`;
+    const stickerRef = doc(db, 'users', currentUser.uid, 'stickers', sanitizedId);
+    const existing = userStickers.find((s) => s.id === sanitizedId);
+    const now = new Date().toISOString();
+
+    try {
+      const payload: UserStickerDoc = {
+        id: sanitizedId,
+        uid: currentUser.uid,
+        emoji: cleanEmoji,
+        name: cleanName,
+        label: cleanLabel,
+        url: cleanUrl,
+        isCustom: Boolean(existing?.isCustom ?? sticker.isCustom),
+        useCount: Math.min(1000000, (existing?.useCount || 0) + 1),
+        lastUsedAt: now,
+        createdAt: existing?.createdAt || now,
+      };
+      await setDoc(stickerRef, payload);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, stickerDocPath);
+    }
+  };
+
+  // Upload & save a custom user sticker in Firestore
+  const saveCustomSticker = async (
+    file: File,
+    label?: string,
+    emoji = '✨'
+  ): Promise<UserStickerDoc> => {
+    if (!currentUser) throw new Error('يجب تسجيل الدخول أولاً');
+
+    const compressed = await compressImageFile(file, 320, 0.82);
+    if (!compressed || compressed.length > 340000) {
+      throw new Error('حجم الصورة كبير جداً بعد الضغط، يرجى اختيار صورة أصغر');
+    }
+
+    const baseName = file.name.replace(/\.[^/.]+$/, '').trim() || 'ملصق مخصص';
+    const cleanLabel = (label || baseName).slice(0, 80);
+    const cleanName = baseName.slice(0, 80);
+    const cleanEmoji = (emoji || '✨').slice(0, 16);
+    const stickerId = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const now = new Date().toISOString();
+
+    const docData: UserStickerDoc = {
+      id: stickerId,
+      uid: currentUser.uid,
+      emoji: cleanEmoji,
+      name: cleanName,
+      label: cleanLabel,
+      url: compressed,
+      isCustom: true,
+      useCount: 0,
+      lastUsedAt: now,
+      createdAt: now,
+    };
+
+    const stickerPath = `users/${currentUser.uid}/stickers/${stickerId}`;
+    try {
+      await setDoc(doc(db, 'users', currentUser.uid, 'stickers', stickerId), docData);
+      return docData;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, stickerPath);
+      throw error;
+    }
+  };
+
+  // Delete a custom sticker from Firestore
+  const deleteCustomSticker = async (stickerId: string) => {
+    if (!currentUser || !stickerId) return;
+    const stickerPath = `users/${currentUser.uid}/stickers/${stickerId}`;
+    try {
+      await deleteDoc(doc(db, 'users', currentUser.uid, 'stickers', stickerId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, stickerPath);
     }
   };
 
@@ -588,7 +1164,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       diceValue: diceVal,
     });
     if (diceVal === 6) {
-      confetti({ particleCount: 40, spread: 60 });
+      fireConfetti({ particleCount: 40, spread: 60 });
     }
   };
 
@@ -612,7 +1188,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentReactions[emoji] = [...userList, currentUser.uid];
         tgAudio.playPopSound();
         if (emoji === '❤️' || emoji === '🔥' || emoji === '🎉') {
-          confetti({
+          fireConfetti({
             particleCount: 25,
             spread: 40,
             origin: { y: 0.7 },
@@ -648,17 +1224,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Delete message
-  const deleteMessage = async (messageId: string) => {
-    if (!activeChatId) return;
-    try {
-      const msgRef = doc(db, 'chats', activeChatId, 'messages', messageId);
-      await deleteDoc(msgRef);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `chats/${activeChatId}/messages/${messageId}`);
-    }
-  };
-
   // Vote in poll
   const voteInPoll = async (messageId: string, optionId: string) => {
     if (!currentUser || !activeChatId) return;
@@ -667,7 +1232,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!msg || !msg.pollData) return;
 
       const currentPoll: PollData = JSON.parse(JSON.stringify(msg.pollData));
-      let totalVotersSet = new Set<string>();
+      const totalVotersSet = new Set<string>();
 
       currentPoll.options = currentPoll.options.map((opt) => {
         let optVotes = opt.votes || [];
@@ -694,36 +1259,43 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Create chat (Direct, Group, Channel)
+  // Generic createChat (for Channels, etc.)
   const createChat = async (chatData: Omit<Chat, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => {
     if (!currentUser) throw new Error('Not logged in');
     try {
       const chatDocRef = doc(collection(db, 'chats'));
+      const now = new Date().toISOString();
+      const members = Array.from(
+        new Set([...chatData.memberIds.filter(Boolean), currentUser.uid])
+      );
       const newChat: Chat = {
         id: chatDocRef.id,
         ...chatData,
         createdBy: currentUser.uid,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        memberIds: Array.from(new Set([...chatData.memberIds, currentUser.uid])),
+        createdAt: now,
+        updatedAt: now,
+        memberIds: members,
+        unreadCounts: { [currentUser.uid]: 0 },
       };
 
-      await setDoc(chatDocRef, newChat);
+      const batch = writeBatch(db);
+      batch.set(chatDocRef, newChat);
 
-      await addDoc(collection(db, 'chats', chatDocRef.id, 'messages'), {
+      const welcomeMsgRef = doc(collection(db, 'chats', chatDocRef.id, 'messages'));
+      batch.set(welcomeMsgRef, {
         chatId: chatDocRef.id,
         senderId: currentUser.uid,
         senderName: userProfile?.displayName || 'مستخدم',
         text:
           newChat.type === 'channel'
             ? `📢 تم إنشاء القناة "${newChat.title}".`
-            : newChat.type === 'group'
-            ? `👥 أنشأ ${userProfile?.displayName || 'مستخدم'} المجموعة.`
-            : `بدأت المحادثة مع ${newChat.title}.`,
+            : `تم إنشاء المحادثة "${newChat.title}".`,
         type: 'text',
-        createdAt: new Date().toISOString(),
+        readBy: [currentUser.uid],
+        createdAt: now,
       });
 
+      await batch.commit();
       setActiveChatId(chatDocRef.id);
       return chatDocRef.id;
     } catch (error) {
@@ -732,49 +1304,92 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const contextValue = useMemo<ChatContextType>(
+    () => ({
+      chats,
+      activeChat,
+      activeChatId,
+      setActiveChatId,
+      messages,
+      loadingChats,
+      loadingMessages,
+      filter,
+      setFilter,
+      searchQuery,
+      setSearchQuery,
+      messageSearchMatches,
+      isSearchingMessages,
+      replyingTo,
+      setReplyingTo,
+      editingMessage,
+      setEditingMessage,
+      showInfoDrawer,
+      setShowInfoDrawer,
+      activeMediaUrl,
+      setActiveMediaUrl,
+      stories,
+      addStory,
+      markStoryViewed,
+      activeStoryIndex,
+      setActiveStoryIndex,
+      callState,
+      startCall,
+      endCall,
+      toggleMute,
+      toggleCamera,
+      typingStatus,
+      updateTypingStatus,
+      getChatDisplayInfo,
+      startDirectChat,
+      createGroup,
+      addMembersToGroup,
+      joinGroupByInvite,
+      sendMessage,
+      editMessageText,
+      toggleReaction,
+      pinMessage,
+      createChat,
+      voteInPoll,
+      sendDiceRoll,
+      userStickers,
+      sendStickerMessage,
+      saveCustomSticker,
+      deleteCustomSticker,
+      pinnedMessage,
+      pendingInviteStatus,
+      clearPendingInviteStatus,
+    }),
+    [
+      chats,
+      activeChat,
+      activeChatId,
+      messages,
+      loadingChats,
+      loadingMessages,
+      filter,
+      searchQuery,
+      messageSearchMatches,
+      isSearchingMessages,
+      replyingTo,
+      setReplyingTo,
+      editingMessage,
+      setEditingMessage,
+      showInfoDrawer,
+      activeMediaUrl,
+      stories,
+      activeStoryIndex,
+      callState,
+      typingStatus,
+      getChatDisplayInfo,
+      userStickers,
+      pinnedMessage,
+      pendingInviteStatus,
+      clearPendingInviteStatus,
+    ]
+  );
+
   return (
-    <ChatContext.Provider
-      value={{
-        chats,
-        activeChat,
-        activeChatId,
-        setActiveChatId,
-        messages,
-        loadingChats,
-        loadingMessages,
-        filter,
-        setFilter,
-        searchQuery,
-        setSearchQuery,
-        replyingTo,
-        setReplyingTo,
-        editingMessage,
-        setEditingMessage,
-        showInfoDrawer,
-        setShowInfoDrawer,
-        activeMediaUrl,
-        setActiveMediaUrl,
-        stories,
-        addStory,
-        activeStoryIndex,
-        setActiveStoryIndex,
-        callState,
-        startCall,
-        endCall,
-        toggleMute,
-        toggleCamera,
-        typingStatus,
-        sendMessage,
-        editMessageText,
-        toggleReaction,
-        pinMessage,
-        deleteMessage,
-        createChat,
-        voteInPoll,
-        sendDiceRoll,
-        pinnedMessage,
-      }}
-    >
+    <ChatContext.Provider value={contextValue}>
       {children}
     </ChatContext.Provider>
   );

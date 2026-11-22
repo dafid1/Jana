@@ -5,7 +5,14 @@ import { getAvatarGradient, getInitials, formatTelegramTime, tgAudio } from '../
 import confetti from 'canvas-confetti';
 
 export const StoryViewerModal: React.FC = () => {
-  const { stories, activeStoryIndex, setActiveStoryIndex, sendMessage, activeChatId } = useChat();
+  const {
+    stories,
+    activeStoryIndex,
+    setActiveStoryIndex,
+    sendMessage,
+    activeChatId,
+    markStoryViewed,
+  } = useChat();
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [replyText, setReplyText] = useState('');
@@ -14,6 +21,12 @@ export const StoryViewerModal: React.FC = () => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentStory = activeStoryIndex !== null ? stories[activeStoryIndex] : null;
+
+  useEffect(() => {
+    if (currentStory?.id) {
+      markStoryViewed(currentStory.id);
+    }
+  }, [currentStory?.id]);
 
   useEffect(() => {
     if (activeStoryIndex === null) {
@@ -30,7 +43,6 @@ export const StoryViewerModal: React.FC = () => {
       if (!isPaused) {
         setProgress((prev) => {
           if (prev >= 100) {
-            // Next story
             if (activeStoryIndex < stories.length - 1) {
               setActiveStoryIndex(activeStoryIndex + 1);
             } else {
@@ -170,7 +182,7 @@ export const StoryViewerModal: React.FC = () => {
 
           <div className="flex items-center gap-1 text-xs text-white/80 bg-black/40 px-2 py-1 rounded-full">
             <Eye className="w-3.5 h-3.5" />
-            <span>{currentStory.viewsCount || 1}</span>
+            <span>{currentStory.viewedBy?.length || 1}</span>
           </div>
         </div>
 

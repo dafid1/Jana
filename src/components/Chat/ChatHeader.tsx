@@ -1,49 +1,178 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowRight,
   Phone,
   Video,
-  Search,
   MoreVertical,
   Volume2,
   VolumeX,
-  Trash2,
   Info,
 } from 'lucide-react';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError, isChatAccessibleOnServer, OperationType } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
-import { getAvatarGradient, getInitials } from '../../utils/telegramHelpers';
+import { TypingIndicator, UserProfile } from '../../types/telegram';
+import {
+  getAvatarGradient,
+  getInitials,
+  isUserOnlineByLastSeen,
+  formatLastSeenArabic,
+} from '../../utils/telegramHelpers';
 
 interface ChatHeaderProps {
   onBack: () => void;
 }
 
-export const ChatHeader: React.FC<ChatHeaderProps> = ({ onBack }) => {
-  const { theme } = useAuth();
-  const { activeChat, showInfoDrawer, setShowInfoDrawer, startCall, typingStatus } = useChat();
+const TYPING_STALE_MS = 7000;
+
+export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ onBack }) => {
+  const { theme, currentUser, usersMap } = useAuth();
+  const {
+    activeChat,
+    showInfoDrawer,
+    setShowInfoDrawer,
+    startCall,
+    getChatDisplayInfo,
+  } = useChat();
   const [showMenu, setShowMenu] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [rawTypingUsers, setRawTypingUsers] = useState<TypingIndicator[]>([]);
+  const [directUserProfile, setDirectUserProfile] = useState<UserProfile | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  const directOtherUid =
+    activeChat?.type === 'direct' && currentUser
+      ? activeChat.memberIds.find((id) => id !== currentUser.uid)
+      : undefined;
+
+  // Listen directly to Firestore users/{otherUid} for real-time lastSeen updates
+  useEffect(() => {
+    if (!currentUser || !directOtherUid) {
+      setDirectUserProfile(null);
+      return;
+    }
+
+    const userRef = doc(db, 'users', directOtherUid);
+    const unsubscribe = onSnapshot(
+      userRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setDirectUserProfile(docSnap.data() as UserProfile);
+          setNowTick(Date.now());
+        } else {
+          setDirectUserProfile(null);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, `users/${directOtherUid}`);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser, directOtherUid]);
+
+  const canListenTyping = Boolean(
+    currentUser &&
+      activeChat &&
+      activeChat.type !== 'saved' &&
+      (activeChat.type === 'channel' ||
+        activeChat.createdBy === currentUser.uid ||
+        (Array.isArray(activeChat.memberIds) && activeChat.memberIds.includes(currentUser.uid)))
+  );
+
+  // Listen in real time to Firestore /chats/{chatId}/typing subcollection
+  useEffect(() => {
+    if (!currentUser || !activeChat || !canListenTyping) {
+      setRawTypingUsers([]);
+      return;
+    }
+
+    let cancelled = false;
+    const chatId = activeChat.id;
+    const typingRef = collection(db, 'chats', chatId, 'typing');
+    const unsubscribe = onSnapshot(
+      typingRef,
+      (snapshot) => {
+        if (cancelled) return;
+        const list: TypingIndicator[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as TypingIndicator;
+          if (data.uid !== currentUser.uid && data.isTyping) {
+            list.push(data);
+          }
+        });
+        setRawTypingUsers(list);
+        setNowTick(Date.now());
+      },
+      async (error) => {
+        const fbCode = (error as { code?: string })?.code;
+        if (fbCode === 'permission-denied') {
+          const accessible = await isChatAccessibleOnServer(chatId, currentUser.uid);
+          if (!accessible) {
+            if (!cancelled) setRawTypingUsers([]);
+            return;
+          }
+        }
+        handleFirestoreError(error, OperationType.GET, `chats/${chatId}/typing`);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [currentUser, activeChat?.id, canListenTyping]);
+
+  // Keep clock ticker active for stale typing expiration and real-time lastSeen online threshold
+  useEffect(() => {
+    const isTypingActive = rawTypingUsers.length > 0;
+    const isDirectChat = activeChat?.type === 'direct';
+    if (!isTypingActive && !isDirectChat) return;
+
+    const intervalMs = isTypingActive ? 1500 : 10000;
+    const interval = setInterval(() => {
+      setNowTick(Date.now());
+    }, intervalMs);
+    return () => clearInterval(interval);
+  }, [rawTypingUsers.length, activeChat?.type]);
 
   if (!activeChat) return null;
 
-  const getSubtitle = () => {
-    if (typingStatus) {
-      return typingStatus;
+  const displayInfo = getChatDisplayInfo(activeChat);
+  const resolvedOtherUser = directUserProfile || displayInfo.otherUser;
+  const isDirectOnline =
+    activeChat.type === 'direct'
+      ? isUserOnlineByLastSeen(resolvedOtherUser, nowTick)
+      : displayInfo.isOnline;
+  const directLastSeenText =
+    activeChat.type === 'direct'
+      ? formatLastSeenArabic(resolvedOtherUser?.lastSeen, nowTick)
+      : '';
+
+  const activeTypers = rawTypingUsers.filter((t) => {
+    const updatedMs = new Date(t.updatedAt).getTime();
+    return !Number.isNaN(updatedMs) && nowTick - updatedMs < TYPING_STALE_MS;
+  });
+
+  const getTypingLabel = (): string | null => {
+    if (activeTypers.length === 0) return null;
+    if (activeChat.type === 'direct') {
+      return 'يكتب الآن';
     }
-    if (activeChat.type === 'channel') {
-      return `${activeChat.membersCount?.toLocaleString() || '1,420,500'} مشترك`;
+    const names = activeTypers.map(
+      (t) => usersMap[t.uid]?.displayName || t.displayName || 'مستخدم'
+    );
+    if (names.length === 1) {
+      return `${names[0]} يكتب الآن`;
     }
-    if (activeChat.type === 'group') {
-      return `${activeChat.membersCount || activeChat.memberIds?.length || 12} عضواً`;
+    if (names.length === 2) {
+      return `${names[0]} و ${names[1]} يكتبان الآن`;
     }
-    if (activeChat.type === 'saved') {
-      return 'سحابتك الشخصية للرسائل والملاحظات';
-    }
-    if (activeChat.title.includes('Bot')) {
-      return 'بوت آلي • خدمة متواصلة';
-    }
-    return 'متصل الآن';
+    return `${names.length} أعضاء يكتبون الآن`;
   };
+
+  const typingLabel = getTypingLabel();
 
   return (
     <div
@@ -70,51 +199,88 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ onBack }) => {
         {/* Chat Avatar */}
         <div
           className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-white shrink-0 overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
-            activeChat.id
+            displayInfo.otherUser?.uid || activeChat.id
           )}`}
         >
-          {activeChat.photoURL ? (
+          {displayInfo.photoURL ? (
             <img
-              src={activeChat.photoURL}
-              alt={activeChat.title}
+              src={displayInfo.photoURL}
+              alt={displayInfo.title}
+              decoding="async"
               className="w-full h-full object-cover"
             />
           ) : (
-            <span>{getInitials(activeChat.title)}</span>
+            <span>{getInitials(displayInfo.title)}</span>
           )}
         </div>
 
-        {/* Title & Status */}
+        {/* Title & Real-Time Typing / Presence Status */}
         <div className="min-w-0">
           <h2
             className={`text-sm font-bold truncate leading-tight flex items-center gap-1.5 ${
               theme === 'light' ? 'text-gray-900' : 'text-white'
             }`}
           >
-            <span className="truncate">{activeChat.title}</span>
+            <span className="truncate">{displayInfo.title}</span>
             {activeChat.type === 'channel' && (
               <span className="text-[#2481cc] text-[12px] font-bold">✓</span>
             )}
           </h2>
-          <p
-            className={`text-xs truncate transition-colors ${
-              typingStatus
-                ? 'text-[#2481cc] font-semibold animate-pulse'
-                : activeChat.type === 'direct' && !activeChat.title.includes('Bot')
-                ? 'text-emerald-400 font-medium'
-                : theme === 'light'
-                ? 'text-gray-500'
-                : 'text-[#7f91a4]'
-            }`}
-          >
-            {getSubtitle()}
-          </p>
+          {typingLabel ? (
+            <div className="flex items-center gap-1.5 text-xs text-[#2481cc] font-semibold truncate">
+              <span className="truncate">{typingLabel}</span>
+              <span className="inline-flex items-center gap-0.5 shrink-0" aria-hidden="true">
+                <span className="w-1 h-1 rounded-full bg-[#2481cc] animate-bounce [animation-delay:0ms]" />
+                <span className="w-1 h-1 rounded-full bg-[#2481cc] animate-bounce [animation-delay:150ms]" />
+                <span className="w-1 h-1 rounded-full bg-[#2481cc] animate-bounce [animation-delay:300ms]" />
+              </span>
+            </div>
+          ) : activeChat.type === 'direct' ? (
+            <div
+              className={`flex items-center gap-1.5 text-xs truncate transition-colors ${
+                isDirectOnline
+                  ? 'text-emerald-400 font-medium'
+                  : theme === 'light'
+                  ? 'text-gray-500'
+                  : 'text-[#7f91a4]'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  isDirectOnline
+                    ? 'bg-emerald-500'
+                    : theme === 'light'
+                    ? 'bg-gray-400'
+                    : 'bg-[#7f91a4]'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="truncate">
+                {isDirectOnline
+                  ? 'متصل'
+                  : directLastSeenText
+                  ? `غير متصل • آخر ظهور ${directLastSeenText}`
+                  : 'غير متصل'}
+              </span>
+            </div>
+          ) : (
+            <p
+              className={`text-xs truncate transition-colors ${
+                displayInfo.isOnline
+                  ? 'text-emerald-400 font-medium'
+                  : theme === 'light'
+                  ? 'text-gray-500'
+                  : 'text-[#7f91a4]'
+              }`}
+            >
+              {displayInfo.subtitle}
+            </p>
+          )}
         </div>
       </div>
 
       {/* Right (RTL End): Actions */}
       <div className="flex items-center gap-1">
-        {/* Audio Call Button */}
         {activeChat.type !== 'channel' && activeChat.type !== 'saved' && (
           <button
             onClick={() => startCall(activeChat, false)}
@@ -129,7 +295,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ onBack }) => {
           </button>
         )}
 
-        {/* Video Call Button */}
         {activeChat.type !== 'channel' && activeChat.type !== 'saved' && (
           <button
             onClick={() => startCall(activeChat, true)}
@@ -144,7 +309,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ onBack }) => {
           </button>
         )}
 
-        {/* Chat Info Drawer Button */}
         <button
           onClick={() => setShowInfoDrawer(!showInfoDrawer)}
           className={`p-2 rounded-full transition-colors cursor-pointer ${
@@ -159,7 +323,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ onBack }) => {
           <Info className="w-5 h-5" />
         </button>
 
-        {/* More Menu */}
         <div className="relative">
           <button
             onClick={() => setShowMenu((prev) => !prev)}
@@ -216,4 +379,4 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ onBack }) => {
       </div>
     </div>
   );
-};
+});

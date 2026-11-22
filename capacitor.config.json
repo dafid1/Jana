@@ -1,6 +1,6 @@
 {
-  "appId": "org.telegram.web.app",
-  "appName": "Telegram Web",
+  "appId": "org.janax.chat.app",
+  "appName": "JanaX",
   "webDir": "dist",
   "bundledWebRuntime": false,
   "server": {

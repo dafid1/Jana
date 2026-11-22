@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { X, Settings, User, AtSign, Phone, FileText, Check, Palette, Type } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Settings, Check, Palette, Type, Camera, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ChatWallpaper } from '../../types/telegram';
+import { compressImageFile, getAvatarGradient, getInitials } from '../../utils/telegramHelpers';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -21,19 +22,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [activeTab, setActiveTab] = useState<'profile' | 'appearance'>('profile');
   const [displayName, setDisplayName] = useState(userProfile?.displayName || '');
-  const [username, setUsername] = useState(userProfile?.username?.replace('@', '') || '');
   const [bio, setBio] = useState(userProfile?.bio || '');
   const [phone, setPhone] = useState(userProfile?.phone || '');
   const [photoURL, setPhotoURL] = useState(userProfile?.photoURL || '');
+  const [isUploading, setIsUploading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isOpen && userProfile) {
+      setDisplayName(userProfile.displayName || '');
+      setBio(userProfile.bio || '');
+      setPhone(userProfile.phone || '');
+      setPhotoURL(userProfile.photoURL || '');
+    }
+  }, [isOpen, userProfile]);
 
   if (!isOpen) return null;
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploading(true);
+    try {
+      const compressed = await compressImageFile(file, 280, 0.8);
+      setPhotoURL(compressed);
+    } catch (err) {
+      console.error('Failed to compress profile image:', err);
+    } finally {
+      setIsUploading(false);
+      e.target.value = '';
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await updateUserProfile({
-      displayName: displayName.trim(),
-      username: username.trim() ? `@${username.trim()}` : undefined,
+      displayName: displayName.trim() || userProfile?.displayName,
       bio: bio.trim(),
       phone: phone.trim(),
       photoURL: photoURL.trim(),
@@ -65,7 +90,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold flex items-center gap-2">
             <Settings className="w-5 h-5 text-[#2481cc]" />
-            <span>إعدادات تيليجرام</span>
+            <span>إعدادات JanaX</span>
           </h2>
           <button
             onClick={onClose}
@@ -101,7 +126,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
         {activeTab === 'appearance' ? (
           <div className="space-y-5">
-            {/* Wallpaper selection */}
             <div>
               <label className="text-xs font-semibold mb-2 block flex items-center gap-1.5 opacity-90">
                 <Palette className="w-4 h-4 text-[#2481cc]" />
@@ -125,7 +149,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </div>
             </div>
 
-            {/* Font scale */}
             <div>
               <label className="text-xs font-semibold mb-2 block flex items-center gap-1.5 opacity-90">
                 <Type className="w-4 h-4 text-[#2481cc]" />
@@ -157,6 +180,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3.5">
+            {/* Interactive Profile Photo Picker */}
+            <div className="flex flex-col items-center gap-2 pb-2">
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarUpload}
+                className="hidden"
+              />
+              <div className="relative group">
+                <div
+                  onClick={() => avatarInputRef.current?.click()}
+                  className={`w-24 h-24 rounded-full flex items-center justify-center font-bold text-2xl text-white shadow-lg overflow-hidden cursor-pointer bg-gradient-to-tr ${getAvatarGradient(
+                    userProfile?.uid || ''
+                  )}`}
+                >
+                  {photoURL ? (
+                    <img src={photoURL} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{getInitials(displayName || userProfile?.displayName)}</span>
+                  )}
+                  <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Camera className="w-6 h-6 text-white" />
+                  </div>
+                </div>
+                {photoURL && (
+                  <button
+                    type="button"
+                    onClick={() => setPhotoURL('')}
+                    className="absolute -bottom-1 -left-1 p-1.5 rounded-full bg-red-600 text-white shadow-md hover:bg-red-700 cursor-pointer"
+                    title="حذف الصورة"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                className="text-xs font-semibold text-[#2481cc] hover:underline cursor-pointer"
+              >
+                {isUploading ? 'جاري معالجة الصورة...' : 'تغيير صورة البروفايل من الجهاز'}
+              </button>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold mb-1 opacity-80">الاسم الظاهر</label>
               <input
@@ -174,20 +242,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
             <div>
               <label className="block text-xs font-semibold mb-1 opacity-80">اسم المستخدم</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-                  dir="ltr"
-                  className={`w-full pl-8 pr-3.5 py-2 text-sm rounded-xl outline-hidden border font-mono ${
-                    theme === 'light'
-                      ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#2481cc]'
-                      : 'bg-[#242f3d] border-[#2b3a4a] text-white focus:border-[#2481cc]'
-                  }`}
-                />
-                <span className="absolute left-3 top-2 text-xs text-[#7f91a4] font-mono">@</span>
-              </div>
+              <input
+                type="text"
+                disabled
+                value={`@${userProfile?.username || ''}`}
+                dir="ltr"
+                className={`w-full px-3.5 py-2 text-sm rounded-xl outline-hidden border font-mono opacity-60 cursor-not-allowed ${
+                  theme === 'light'
+                    ? 'bg-gray-100 border-gray-200 text-gray-700'
+                    : 'bg-[#1e2a38] border-[#2b3a4a] text-gray-300'
+                }`}
+              />
             </div>
 
             <div>
@@ -223,32 +288,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold mb-1 opacity-80">
-                رابط صورتك الشخصية
-              </label>
-              <input
-                type="url"
-                value={photoURL}
-                onChange={(e) => setPhotoURL(e.target.value)}
-                dir="ltr"
-                placeholder="https://..."
-                className={`w-full px-3.5 py-2 text-xs rounded-xl outline-hidden border font-mono ${
-                  theme === 'light'
-                    ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#2481cc]'
-                    : 'bg-[#242f3d] border-[#2b3a4a] text-white focus:border-[#2481cc]'
-                }`}
-              />
-            </div>
-
             <button
               type="submit"
-              className="w-full py-2.5 mt-2 rounded-xl bg-[#2481cc] hover:bg-[#2172b5] text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isUploading}
+              className="w-full py-2.5 mt-2 rounded-xl bg-[#2481cc] hover:bg-[#2172b5] text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isSaved ? (
                 <>
                   <Check className="w-4 h-4" />
-                  <span>تم الحفظ بنجاح!</span>
+                  <span>تم حفظ التعديلات في السحابة!</span>
                 </>
               ) : (
                 <span>حفظ التعديلات</span>

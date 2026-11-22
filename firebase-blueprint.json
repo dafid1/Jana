@@ -2,33 +2,36 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "User profile information in Telegram",
+      "description": "JanaX user profile and account metadata",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
-        "displayName": { "type": "string", "maxLength": 100 },
         "username": { "type": "string", "maxLength": 50 },
-        "photoURL": { "type": "string", "maxLength": 2048 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "photoURL": { "type": "string", "maxLength": 500000 },
         "avatarColor": { "type": "string", "maxLength": 30 },
         "bio": { "type": "string", "maxLength": 300 },
         "phone": { "type": "string", "maxLength": 30 },
         "isOnline": { "type": "boolean" },
         "lastSeen": { "type": "string", "maxLength": 50 },
+        "createdBy": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "maxLength": 50 }
       },
-      "required": ["uid", "displayName"]
+      "required": ["uid", "username", "displayName", "role"]
     },
     "Chat": {
       "title": "Chat",
-      "description": "Telegram conversation (direct, group, channel, or saved messages)",
+      "description": "JanaX conversation (direct, group, channel, or saved messages)",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "type": { "type": "string", "enum": ["direct", "group", "channel", "saved"] },
         "title": { "type": "string", "maxLength": 120 },
-        "photoURL": { "type": "string", "maxLength": 2048 },
+        "photoURL": { "type": "string", "maxLength": 500000 },
         "avatarColor": { "type": "string", "maxLength": 30 },
         "description": { "type": "string", "maxLength": 500 },
+        "inviteCode": { "type": "string", "maxLength": 64 },
         "createdBy": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "maxLength": 50 },
         "updatedAt": { "type": "string", "maxLength": 50 },
@@ -39,40 +42,172 @@
     },
     "Message": {
       "title": "Message",
-      "description": "Chat message including text, media, voice, sticker, or poll",
+      "description": "Chat message with real readBy receipts and media",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "chatId": { "type": "string", "maxLength": 128 },
         "senderId": { "type": "string", "maxLength": 128 },
         "senderName": { "type": "string", "maxLength": 100 },
-        "senderPhoto": { "type": "string", "maxLength": 2048 },
+        "senderPhoto": { "type": "string", "maxLength": 500000 },
         "text": { "type": "string", "maxLength": 4000 },
-        "type": { "type": "string", "enum": ["text", "image", "file", "voice", "sticker", "poll"] },
-        "mediaUrl": { "type": "string", "maxLength": 500000 },
+        "type": { "type": "string", "enum": ["text", "image", "file", "voice", "sticker", "poll", "dice"] },
+        "mediaUrl": { "type": "string", "maxLength": 800000 },
         "mediaName": { "type": "string", "maxLength": 200 },
         "mediaSize": { "type": "string", "maxLength": 50 },
         "voiceDuration": { "type": "number" },
         "replyToId": { "type": "string", "maxLength": 128 },
         "replyToText": { "type": "string", "maxLength": 300 },
         "isPinned": { "type": "boolean" },
+        "isSpoiler": { "type": "boolean" },
+        "editedAt": { "type": "string", "maxLength": 50 },
+        "readBy": { "type": "array" },
         "createdAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "chatId", "senderId", "text", "type"]
+    },
+    "GroupInvite": {
+      "title": "GroupInvite",
+      "description": "Group invitation mapping inviteCode to chatId",
+      "type": "object",
+      "properties": {
+        "inviteCode": { "type": "string", "maxLength": 64 },
+        "chatId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "photoURL": { "type": "string", "maxLength": 500000 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["inviteCode", "chatId", "title", "createdBy"]
+    },
+    "TypingIndicator": {
+      "title": "TypingIndicator",
+      "description": "Real-time per-user typing state inside a chat",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "isTyping": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "displayName", "isTyping", "updatedAt"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "Cloud-persisted user stories",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 100 },
+        "userAvatar": { "type": "string", "maxLength": 500000 },
+        "mediaUrl": { "type": "string", "maxLength": 800000 },
+        "caption": { "type": "string", "maxLength": 500 },
+        "viewedBy": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "userId", "userName", "mediaUrl"]
+    },
+    "AdminUserCredential": {
+      "title": "AdminUserCredential",
+      "description": "Admin-only stored initial/account credential record isolated from public user profiles",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "password": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "password", "updatedAt"]
+    },
+    "CalculatorLockPublic": {
+      "title": "CalculatorLockPublic",
+      "description": "Publicly verifiable salted SHA-256 hash and version of the global Calculator access PIN (never stores plaintext PIN)",
+      "type": "object",
+      "properties": {
+        "pinHash": { "type": "string", "maxLength": 64 },
+        "salt": { "type": "string", "maxLength": 64 },
+        "pinLength": { "type": "number" },
+        "version": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["pinHash", "salt", "pinLength", "version", "updatedAt"]
+    },
+    "CalculatorLockAdmin": {
+      "title": "CalculatorLockAdmin",
+      "description": "Admin-only record holding the current active Calculator PIN for Admin viewing and auditing",
+      "type": "object",
+      "properties": {
+        "pin": { "type": "string", "maxLength": 12, "pattern": "^[0-9]{4,12}$" },
+        "version": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["pin", "version", "updatedAt", "updatedBy"]
+    },
+    "UserSticker": {
+      "title": "UserSticker",
+      "description": "User custom and recently used stickers synced across devices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uid": { "type": "string", "maxLength": 128 },
+        "emoji": { "type": "string", "maxLength": 16 },
+        "name": { "type": "string", "maxLength": 80 },
+        "label": { "type": "string", "maxLength": 80 },
+        "url": { "type": "string", "maxLength": 350000 },
+        "isCustom": { "type": "boolean" },
+        "useCount": { "type": "number" },
+        "lastUsedAt": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "uid", "emoji", "name", "label", "url", "isCustom", "useCount", "lastUsedAt", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
-      "description": "Public and personal profile data for users"
+      "description": "JanaX user profiles"
+    },
+    "/users/{userId}/stickers/{stickerId}": {
+      "schema": "UserSticker",
+      "description": "Personal custom and recently used stickers per user"
+    },
+    "/admins/{userId}": {
+      "schema": "UserProfile",
+      "description": "Trusted admin UID registry"
+    },
+    "/adminUserCredentials/{userId}": {
+      "schema": "AdminUserCredential",
+      "description": "Admin-only account credential records"
+    },
+    "/appConfig/{configId}": {
+      "schema": "CalculatorLockPublic",
+      "description": "Global application lock configuration containing only salted PIN hash and version"
+    },
+    "/adminConfig/{configId}": {
+      "schema": "CalculatorLockAdmin",
+      "description": "Admin-only calculator lock configuration holding the active numeric PIN"
     },
     "/chats/{chatId}": {
       "schema": "Chat",
-      "description": "Direct, group, and channel chats"
+      "description": "Direct, group, channel, and saved chats"
     },
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Messages sent within a chat"
+    },
+    "/chats/{chatId}/typing/{userId}": {
+      "schema": "TypingIndicator",
+      "description": "Real-time typing indicator status per chat participant"
+    },
+    "/groupInvites/{inviteCode}": {
+      "schema": "GroupInvite",
+      "description": "Invite links for joining groups"
+    },
+    "/stories/{storyId}": {
+      "schema": "Story",
+      "description": "Cloud stories shared by users"
     }
   }
 }

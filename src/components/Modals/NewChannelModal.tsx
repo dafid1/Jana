@@ -28,7 +28,7 @@ export const NewChannelModal: React.FC<NewChannelModalProps> = ({ isOpen, onClos
       await createChat({
         type: 'channel',
         title: title.trim(),
-        description: description.trim() || 'قناة تيليجرام للبث العام ومشاركة المحتوى',
+        description: description.trim() || 'قناة JanaX للبث العام ومشاركة المحتوى',
         photoURL: photoURL.trim(),
         avatarColor: '#2AABEE',
         memberIds: [currentUser?.uid || ''],

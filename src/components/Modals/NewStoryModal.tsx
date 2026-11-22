@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { X, Camera, Image as ImageIcon, Send } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
+import { compressImageFile } from '../../utils/telegramHelpers';
 
 interface NewStoryModalProps {
   isOpen: boolean;
@@ -24,19 +25,23 @@ export const NewStoryModal: React.FC<NewStoryModalProps> = ({ isOpen, onClose })
     'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80',
   ];
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImageUrl(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    e.target.value = '';
+    try {
+      const compressed = await compressImageFile(file, 900, 0.78);
+      setImageUrl(compressed);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handlePublish = () => {
     const finalUrl = imageUrl || samplePhotos[0];
     addStory(finalUrl, caption.trim());
+    setImageUrl('');
+    setCaption('');
     onClose();
   };
 

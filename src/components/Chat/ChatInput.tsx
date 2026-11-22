@@ -12,20 +12,28 @@ import {
   Edit2,
   Dices,
   EyeOff,
-  Bold,
-  Code,
+  Reply,
+  Sticker,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
-import { TG_STICKERS, formatDuration } from '../../utils/telegramHelpers';
+import {
+  formatDuration,
+  compressImageFile,
+  getMessageReplyPreview,
+  formatBytes,
+  estimateDataUrlBytes,
+} from '../../utils/telegramHelpers';
+import { StickerPicker, SelectableSticker } from './StickerPicker';
 
 interface ChatInputProps {
   onOpenPollModal: () => void;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
-  const { theme } = useAuth();
+  const { theme, usersMap } = useAuth();
   const {
+    activeChatId,
     sendMessage,
     replyingTo,
     setReplyingTo,
@@ -33,6 +41,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
     setEditingMessage,
     editMessageText,
     sendDiceRoll,
+    sendStickerMessage,
+    updateTypingStatus,
   } = useChat();
 
   const [text, setText] = useState('');
@@ -48,9 +58,50 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pickerWrapperRef = useRef<HTMLDivElement>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTypingPingRef = useRef<number>(0);
+  const isTypingSentRef = useRef<boolean>(false);
 
-  // If editing message is set, pre-fill text
+  // Close Emoji/Sticker picker on outside click or Escape
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (pickerWrapperRef.current && !pickerWrapperRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [showEmojiPicker]);
+
+  // Clear typing status on chat switch or unmount
+  useEffect(() => {
+    const currentChatForCleanup = activeChatId;
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      if (isTypingSentRef.current && currentChatForCleanup) {
+        isTypingSentRef.current = false;
+        updateTypingStatus(false, currentChatForCleanup).catch(() => {});
+      }
+    };
+  }, [activeChatId]);
+
   useEffect(() => {
     if (editingMessage) {
       setText(editingMessage.text);
@@ -64,7 +115,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
     }
   }, [replyingTo]);
 
-  // Voice timer
   useEffect(() => {
     if (isRecording) {
       setRecordingSeconds(0);
@@ -80,8 +130,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
     };
   }, [isRecording]);
 
+  const clearTypingIndicator = () => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    if (isTypingSentRef.current) {
+      isTypingSentRef.current = false;
+      updateTypingStatus(false).catch(() => {});
+    }
+  };
+
   const handleSendText = async () => {
     if (!text.trim()) return;
+
+    clearTypingIndicator();
 
     if (editingMessage) {
       await editMessageText(editingMessage.id, text.trim());
@@ -107,60 +170,126 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
     }
   };
 
-  // Image Upload
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Compressed Image Upload (Safe for Cloud Firestore 1MB limit)
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
+    e.target.value = '';
+    try {
+      const compressed = await compressImageFile(file, 900, 0.78);
+      const estimatedBytes = estimateDataUrlBytes(compressed);
       await sendMessage('📷 صورة', 'image', {
-        mediaUrl: dataUrl,
+        mediaUrl: compressed,
         mediaName: file.name,
+        mediaSize: estimatedBytes > 0 ? formatBytes(estimatedBytes) : undefined,
       });
       setShowAttachMenu(false);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    } catch (err) {
+      console.error('Image compression failed:', err);
+    }
   };
 
-  // Document Upload
+  // Document Upload (up to 450KB to stay safely under Firestore doc size limit)
   const handleDocSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
+
+    if (file.size > 480 * 1024) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+      sendMessage(`📎 ${file.name} (${sizeMB})`, 'text');
+      setShowAttachMenu(false);
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = async () => {
       const dataUrl = reader.result as string;
-      const sizeMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+      const sizeKB = Math.max(1, Math.round(file.size / 1024)) + ' KB';
       await sendMessage(file.name, 'file', {
         mediaUrl: dataUrl,
         mediaName: file.name,
-        mediaSize: sizeMB,
+        mediaSize: sizeKB,
       });
       setShowAttachMenu(false);
     };
     reader.readAsDataURL(file);
-    e.target.value = '';
   };
 
-  // Send Sticker
-  const handleSendSticker = async (sticker: (typeof TG_STICKERS)[0]) => {
+  const handleSendSticker = async (sticker: SelectableSticker) => {
+    await sendStickerMessage(sticker);
     setShowEmojiPicker(false);
-    await sendMessage(sticker.emoji, 'sticker', {
-      mediaUrl: sticker.url,
-      mediaName: sticker.name,
-    });
   };
 
-  // Finish voice recording
+  // Start real mic capture when supported
+  const handleStartVoice = async () => {
+    setIsRecording(true);
+    audioChunksRef.current = [];
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        recorder.ondataavailable = (ev) => {
+          if (ev.data.size > 0) audioChunksRef.current.push(ev.data);
+        };
+        recorder.start();
+        mediaRecorderRef.current = recorder;
+      }
+    } catch {
+      // Fallback to timer-only voice note if microphone is unavailable
+      mediaRecorderRef.current = null;
+    }
+  };
+
+  const stopRecorderStream = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.stream) {
+      mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
+    }
+  };
+
+  const handleCancelVoice = () => {
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+    } catch {
+      // Ignore
+    }
+    stopRecorderStream();
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+  };
+
   const handleFinishVoice = async () => {
     const duration = Math.max(recordingSeconds, 1);
-    setIsRecording(false);
-    await sendMessage('🎤 رسالة صوتية', 'voice', {
-      voiceDuration: duration,
-    });
+    const recorder = mediaRecorderRef.current;
+
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.onstop = async () => {
+        stopRecorderStream();
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        if (blob.size > 0 && blob.size < 450 * 1024) {
+          const reader = new FileReader();
+          reader.onload = async () => {
+            await sendMessage('🎤 رسالة صوتية', 'voice', {
+              voiceDuration: duration,
+              mediaUrl: reader.result as string,
+            });
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          await sendMessage('🎤 رسالة صوتية', 'voice', { voiceDuration: duration });
+        }
+      };
+      recorder.stop();
+      mediaRecorderRef.current = null;
+      setIsRecording(false);
+    } else {
+      setIsRecording(false);
+      await sendMessage('🎤 رسالة صوتية', 'voice', {
+        voiceDuration: duration,
+      });
+    }
   };
 
   const emojis = [
@@ -171,6 +300,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
 
   return (
     <div
+      ref={pickerWrapperRef}
       className={`relative border-t shrink-0 p-3 select-none transition-colors ${
         theme === 'light' ? 'bg-white border-gray-200' : 'bg-[#17212b] border-[#232e3c]'
       }`}
@@ -223,13 +353,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
             theme === 'light' ? 'bg-[#f4f7fb]' : 'bg-[#242f3d]'
           }`}
         >
-          <div className="min-w-0 pr-2">
-            <div className="font-bold text-[#2481cc]">{replyingTo.senderName}</div>
-            <div className="truncate text-gray-400">{replyingTo.text}</div>
+          <div className="flex items-center gap-2 min-w-0 pr-2">
+            <Reply className="w-4 h-4 text-[#2481cc] shrink-0" />
+            <div className="min-w-0">
+              <div className="font-bold text-[#2481cc] truncate">
+                الرد على {usersMap[replyingTo.senderId]?.displayName || replyingTo.senderName}
+              </div>
+              <div className={`truncate ${theme === 'light' ? 'text-gray-600' : 'text-gray-300'}`}>
+                {getMessageReplyPreview(replyingTo)}
+              </div>
+            </div>
           </div>
           <button
             onClick={() => setReplyingTo(null)}
-            className="p-1 rounded-full text-[#7f91a4] hover:text-white"
+            className="p-1 rounded-full text-[#7f91a4] hover:text-white shrink-0 cursor-pointer"
+            title="إلغاء الرد"
           >
             <X className="w-4 h-4" />
           </button>
@@ -238,7 +376,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
 
       {/* Main Input Row */}
       <div className="flex items-end gap-2 max-w-4xl mx-auto">
-        {/* Attachment Button */}
         <div className="relative">
           <button
             onClick={() => {
@@ -257,7 +394,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
             <Paperclip className="w-5 h-5 -rotate-45" />
           </button>
 
-          {/* Attachment Popup Menu */}
           {showAttachMenu && (
             <div
               className={`absolute bottom-13 right-0 rounded-2xl shadow-xl border overflow-hidden p-1.5 flex flex-col gap-1 min-w-[190px] z-50 animate-in fade-in zoom-in-95 duration-150 ${
@@ -273,7 +409,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
                 <div className="w-7 h-7 rounded-full bg-[#2481cc]/20 text-[#2481cc] flex items-center justify-center">
                   <ImageIcon className="w-4 h-4" />
                 </div>
-                <span>صورة أو فيديو</span>
+                <span>صورة</span>
               </button>
 
               <button
@@ -315,7 +451,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
           )}
         </div>
 
-        {/* Recording Visualizer or Text Input */}
         {isRecording ? (
           <div
             className={`flex-1 flex items-center justify-between px-4 py-2.5 rounded-2xl border ${
@@ -333,7 +468,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
             </div>
 
             <button
-              onClick={() => setIsRecording(false)}
+              onClick={handleCancelVoice}
               className="text-xs font-semibold hover:underline cursor-pointer"
             >
               إلغاء
@@ -352,9 +487,28 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
               rows={1}
               value={text}
               onChange={(e) => {
-                setText(e.target.value);
+                const val = e.target.value;
+                setText(val);
                 e.target.style.height = 'auto';
                 e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+
+                if (val.trim().length > 0) {
+                  const now = Date.now();
+                  if (!isTypingSentRef.current || now - lastTypingPingRef.current > 2000) {
+                    isTypingSentRef.current = true;
+                    lastTypingPingRef.current = now;
+                    updateTypingStatus(true).catch(() => {});
+                  }
+                  if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                  typingTimeoutRef.current = setTimeout(() => {
+                    if (isTypingSentRef.current) {
+                      isTypingSentRef.current = false;
+                      updateTypingStatus(false).catch(() => {});
+                    }
+                  }, 3500);
+                } else if (isTypingSentRef.current) {
+                  clearTypingIndicator();
+                }
               }}
               onKeyDown={handleKeyDown}
               placeholder={editingMessage ? 'عدّل الرسالة...' : 'اكتب رسالة...'}
@@ -365,9 +519,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
               }`}
             />
 
-            {/* Formatting Tools & Emoji Buttons */}
             <div className="flex items-center gap-0.5 shrink-0">
-              {/* Spoiler Toggle Button */}
               <button
                 onClick={() => setIsSpoilerActive(!isSpoilerActive)}
                 className={`p-1.5 rounded-full transition-colors cursor-pointer ${
@@ -380,20 +532,50 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
                 <EyeOff className="w-4 h-4" />
               </button>
 
-              {/* Emoji & Sticker Toggle Button */}
               <button
+                type="button"
                 onClick={() => {
-                  setShowEmojiPicker(!showEmojiPicker);
-                  setShowAttachMenu(false);
+                  if (showEmojiPicker && activePickerTab === 'sticker') {
+                    setShowEmojiPicker(false);
+                  } else {
+                    setActivePickerTab('sticker');
+                    setShowEmojiPicker(true);
+                    setShowAttachMenu(false);
+                  }
                 }}
                 className={`p-1.5 rounded-full transition-colors cursor-pointer ${
-                  showEmojiPicker
-                    ? 'text-[#2481cc]'
+                  showEmojiPicker && activePickerTab === 'sticker'
+                    ? 'text-[#2481cc] bg-[#2481cc]/10'
                     : theme === 'light'
                     ? 'text-gray-400 hover:text-gray-700'
                     : 'text-[#7f91a4] hover:text-white'
                 }`}
-                title="الرموز التعبيرية والملصقات"
+                title="الملصقات"
+                aria-label="فتح منتقي الملصقات"
+              >
+                <Sticker className="w-5 h-5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (showEmojiPicker && activePickerTab === 'emoji') {
+                    setShowEmojiPicker(false);
+                  } else {
+                    setActivePickerTab('emoji');
+                    setShowEmojiPicker(true);
+                    setShowAttachMenu(false);
+                  }
+                }}
+                className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                  showEmojiPicker && activePickerTab === 'emoji'
+                    ? 'text-[#2481cc] bg-[#2481cc]/10'
+                    : theme === 'light'
+                    ? 'text-gray-400 hover:text-gray-700'
+                    : 'text-[#7f91a4] hover:text-white'
+                }`}
+                title="الرموز التعبيرية"
+                aria-label="فتح الرموز التعبيرية"
               >
                 <Smile className="w-5 h-5" />
               </button>
@@ -401,7 +583,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
           </div>
         )}
 
-        {/* Action Button: Send or Voice Record or Save Edit */}
         {editingMessage ? (
           <button
             onClick={handleSendText}
@@ -428,7 +609,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
           </button>
         ) : (
           <button
-            onClick={() => setIsRecording(true)}
+            onClick={handleStartVoice}
             className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-105 active:scale-95 cursor-pointer ${
               theme === 'light'
                 ? 'text-gray-500 hover:bg-gray-100 hover:text-[#2481cc]'
@@ -441,43 +622,52 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
         )}
       </div>
 
-      {/* Emoji & Telegram Sticker Drawer Popover */}
+      {/* Emoji & Sticker Drawer Popover */}
       {showEmojiPicker && (
         <div
-          className={`absolute bottom-16 left-6 right-6 sm:left-auto sm:right-16 sm:w-80 rounded-2xl shadow-2xl border overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150 ${
+          className={`absolute bottom-16 left-4 right-4 sm:left-auto sm:right-16 sm:w-[340px] rounded-2xl shadow-2xl border overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150 ${
             theme === 'light' ? 'bg-white border-gray-200' : 'bg-[#1e2a38] border-[#2b3a4a]'
           }`}
         >
-          {/* Header Tabs */}
-          <div className="flex border-b border-white/10 text-xs font-semibold">
+          <div
+            className={`flex border-b text-xs font-semibold ${
+              theme === 'light' ? 'border-gray-100' : 'border-white/10'
+            }`}
+          >
             <button
+              type="button"
               onClick={() => setActivePickerTab('emoji')}
               className={`flex-1 py-2.5 text-center transition-colors cursor-pointer ${
                 activePickerTab === 'emoji'
                   ? 'text-[#2481cc] border-b-2 border-[#2481cc]'
+                  : theme === 'light'
+                  ? 'text-gray-500 hover:text-gray-800'
                   : 'text-[#7f91a4] hover:text-white'
               }`}
             >
               الرموز التعبيرية
             </button>
             <button
+              type="button"
               onClick={() => setActivePickerTab('sticker')}
               className={`flex-1 py-2.5 text-center transition-colors cursor-pointer ${
                 activePickerTab === 'sticker'
                   ? 'text-[#2481cc] border-b-2 border-[#2481cc]'
+                  : theme === 'light'
+                  ? 'text-gray-500 hover:text-gray-800'
                   : 'text-[#7f91a4] hover:text-white'
               }`}
             >
-              ملصقات تيليجرام
+              ملصقات JanaX
             </button>
           </div>
 
-          {/* Content Area */}
-          <div className="p-3 max-h-56 overflow-y-auto">
+          <div className="p-3">
             {activePickerTab === 'emoji' ? (
-              <div className="grid grid-cols-6 gap-2 text-xl text-center">
+              <div className="grid grid-cols-6 gap-2 text-xl text-center max-h-64 overflow-y-auto">
                 {emojis.map((emoji) => (
                   <button
+                    type="button"
                     key={emoji}
                     onClick={() => setText((prev) => prev + emoji)}
                     className="p-1.5 rounded-lg hover:scale-125 transition-transform cursor-pointer"
@@ -487,24 +677,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenPollModal }) => {
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
-                {TG_STICKERS.map((sticker) => (
-                  <button
-                    key={sticker.id}
-                    onClick={() => handleSendSticker(sticker)}
-                    className="p-1 rounded-xl hover:bg-white/10 transition-colors flex flex-col items-center gap-1 cursor-pointer"
-                  >
-                    <img
-                      src={sticker.url}
-                      alt={sticker.name}
-                      className="w-16 h-16 object-cover rounded-lg shadow-xs"
-                    />
-                    <span className="text-[10px] font-medium truncate w-full text-center opacity-80">
-                      {sticker.label}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <StickerPicker onSelectSticker={handleSendSticker} />
             )}
           </div>
         </div>

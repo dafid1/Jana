@@ -1,4 +1,4 @@
-name: Build Telegram Web Android APK
+name: Build JanaX Android APK
 
 on:
   push:
@@ -18,7 +18,7 @@ on:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build JanaX Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -72,19 +72,19 @@ jobs:
           fi
           echo "Found APK at: $APK_PATH"
           echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          cp "$APK_PATH" ./telegram-web-debug.apk
+          cp "$APK_PATH" ./JanaX-debug.apk
 
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-Web-APK
-          path: ./telegram-web-debug.apk
+          name: JanaX-APK
+          path: ./JanaX-debug.apk
           retention-days: 14
 
       - name: 📋 Summary
         run: |
-          echo "### 📱 تم بناء نسخة APK بنجاح! 🎉" >> $GITHUB_STEP_SUMMARY
-          echo "- **اسم التطبيق**: Telegram Web" >> $GITHUB_STEP_SUMMARY
-          echo "- **الحزمة (Package ID)**: org.telegram.web.app" >> $GITHUB_STEP_SUMMARY
-          echo "- **الملف الناتج**: \`telegram-web-debug.apk\`" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 تم بناء نسخة JanaX APK بنجاح! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "- **اسم التطبيق**: JanaX" >> $GITHUB_STEP_SUMMARY
+          echo "- **الحزمة (Package ID)**: org.janax.chat.app" >> $GITHUB_STEP_SUMMARY
+          echo "- **الملف الناتج**: \`JanaX-debug.apk\`" >> $GITHUB_STEP_SUMMARY
           echo "- يمكنك تنزيل ملف الـ APK مباشرة من قسم **Artifacts** في هذه الصفحة وتثبيته على هاتفك الأندرويد." >> $GITHUB_STEP_SUMMARY

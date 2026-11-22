@@ -1,155 +1,385 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, User, AtSign, ArrowLeft } from 'lucide-react';
+import {
+  Lock,
+  User,
+  Phone,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  ExternalLink,
+  Clock,
+  UserPlus,
+  LogIn,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { FIREBASE_PROJECT_ID } from '../../firebase/config';
 
 export const LoginModal: React.FC = () => {
-  const { loginWithGoogle, loginAsDemoUser, theme } = useAuth();
-  const [name, setName] = useState('');
-  const [username, setUsername] = useState('');
+  const {
+    loginWithCredentials,
+    registerWithPhone,
+    theme,
+    logoutReason,
+    clearLogoutReason,
+  } = useAuth();
+
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+
+  // Login fields
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+
+  // Phone registration fields
+  const [displayName, setDisplayName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showRegPassword, setShowRegPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [providerDisabled, setProviderDisabled] = useState(false);
 
-  const handleDemoSubmit = async (e: React.FormEvent) => {
+  const switchMode = (nextMode: 'login' | 'register') => {
+    setMode(nextMode);
+    setError('');
+    setProviderDisabled(false);
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      setError('يرجى إدخال اسمك');
+    if (!identifier.trim() || !password) {
+      setError('يرجى إدخال اسم المستخدم أو رقم الهاتف وكلمة المرور');
       return;
     }
+
     setIsSubmitting(true);
     setError('');
+    setProviderDisabled(false);
+    clearLogoutReason();
+
     try {
-      const uName = username.trim() || `user_${Math.floor(Math.random() * 8999 + 1000)}`;
-      await loginAsDemoUser(name.trim(), uName);
-    } catch (err) {
-      setError('حدث خطأ أثناء تسجيل الدخول. حاول ثانية.');
+      await loginWithCredentials(identifier, password);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'حدث خطأ أثناء تسجيل الدخول';
+      if (msg === 'PROVIDER_DISABLED') {
+        setProviderDisabled(true);
+        setError('يجب تفعيل موفر تسجيل الدخول (Email/Password) من لوحة Firebase أولاً.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone.trim() || !regPassword) {
+      setError('يرجى إدخال رقم الهاتف وكلمة المرور');
+      return;
+    }
+    if (regPassword.length < 6) {
+      setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      setError('كلمتا المرور غير متطابقتين');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
+    setProviderDisabled(false);
+    clearLogoutReason();
+
     try {
-      await loginWithGoogle();
-    } catch (err) {
-      setError('تعذر تسجيل الدخول بحساب Google.');
+      await registerWithPhone({
+        phone,
+        password: regPassword,
+        displayName,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'تعذر إنشاء الحساب';
+      if (msg === 'PROVIDER_DISABLED') {
+        setProviderDisabled(true);
+        setError('يجب تفعيل موفر تسجيل الدخول (Email/Password) من لوحة Firebase أولاً.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const inputClass = `w-full pr-10 pl-3.5 py-2.5 text-sm rounded-xl outline-hidden border transition-all ${
+    theme === 'light'
+      ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#2481cc]'
+      : 'bg-[#242f3d] border-[#2b3a4a] text-white focus:border-[#2481cc]'
+  }`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm select-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0b121b]/90 backdrop-blur-md select-none overflow-y-auto">
       <div
-        className={`w-full max-w-md rounded-3xl p-8 shadow-2xl border text-center transition-all ${
+        className={`w-full max-w-md rounded-3xl p-7 shadow-2xl border text-center transition-all my-auto ${
           theme === 'light'
             ? 'bg-white border-gray-200 text-gray-900'
             : 'bg-[#17212b] border-[#2b3a4a] text-white'
         }`}
       >
-        {/* Telegram Icon */}
-        <div className="w-20 h-20 rounded-full bg-[#2481cc] mx-auto mb-4 flex items-center justify-center text-white shadow-xl">
-          <svg className="w-10 h-10 -ml-1" viewBox="0 0 24 24" fill="currentColor">
+        {/* JanaX Brand Emblem */}
+        <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-[#2481cc] to-[#43b5e4] mx-auto mb-3 flex items-center justify-center text-white shadow-xl">
+          <svg className="w-8 h-8 -ml-0.5" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" />
           </svg>
         </div>
 
-        <h1 className="text-2xl font-bold mb-1">Telegram Web</h1>
-        <p className="text-xs text-[#7f91a4] mb-6">
-          أهلاً بك! سجّل دخولك للبدء بالمراسلة الفورية وحفظ المحادثات في Firebase.
+        <h1 className="text-2xl font-bold tracking-tight mb-1">JanaX</h1>
+        <p className="text-xs text-[#7f91a4] mb-5">
+          {mode === 'login'
+            ? 'سجّل دخولك باسم المستخدم أو رقم الهاتف وكلمة المرور'
+            : 'أنشئ حساباً جديداً برقم الهاتف وكلمة المرور'}
         </p>
 
-        {error && (
-          <div className="mb-4 p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs text-right">
-            {error}
+        {/* Login / Register Mode Switch */}
+        <div
+          className={`flex p-1 rounded-2xl mb-5 border ${
+            theme === 'light'
+              ? 'bg-gray-100 border-gray-200'
+              : 'bg-[#0e1621]/70 border-[#232e3c]'
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => switchMode('login')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              mode === 'login'
+                ? 'bg-[#2481cc] text-white shadow-sm'
+                : 'text-[#7f91a4] hover:text-white'
+            }`}
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>تسجيل الدخول</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode('register')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              mode === 'register'
+                ? 'bg-[#2481cc] text-white shadow-sm'
+                : 'text-[#7f91a4] hover:text-white'
+            }`}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>إنشاء حساب</span>
+          </button>
+        </div>
+
+        {logoutReason && !error && (
+          <div className="mb-4 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs text-right leading-relaxed flex items-center gap-2">
+            <Clock className="w-4 h-4 shrink-0 text-amber-400" />
+            <span>{logoutReason}</span>
           </div>
         )}
 
-        {/* Quick Demo Login Form */}
-        <form onSubmit={handleDemoSubmit} className="space-y-3 mb-4 text-right">
-          <div>
-            <label className="block text-xs font-semibold mb-1 opacity-80">اسمك الشخصي</label>
-            <div className="relative">
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="مثال: أحمد محمد"
-                className={`w-full px-3.5 py-2.5 text-sm rounded-xl outline-hidden border transition-all ${
-                  theme === 'light'
-                    ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#2481cc]'
-                    : 'bg-[#242f3d] border-[#2b3a4a] text-white focus:border-[#2481cc]'
-                }`}
-              />
+        {error && (
+          <div className="mb-4 p-3 rounded-2xl bg-red-500/10 border border-red-500/25 text-red-400 text-xs text-right leading-relaxed">
+            <div className="flex items-center gap-2 font-bold mb-1">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>تنبيه</span>
             </div>
+            <p>{error}</p>
+            {providerDisabled && (
+              <div className="mt-2.5 pt-2 border-t border-red-500/20 text-[11px] text-amber-200 space-y-1">
+                <p className="font-bold">خطوات التفعيل في Firebase Console:</p>
+                <p>1. افتح Authentication ← Sign-in method</p>
+                <p>2. اضغط على Email/Password وقم بتفعيل الخيار الأول (Enable) ثم Save</p>
+                <a
+                  href={`https://console.firebase.google.com/project/${FIREBASE_PROJECT_ID}/authentication/providers`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 mt-1 text-sky-400 underline font-semibold"
+                >
+                  <span>فتح إعدادات المصادقة في Firebase</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            )}
           </div>
+        )}
 
-          <div>
-            <label className="block text-xs font-semibold mb-1 opacity-80">
-              اسم المستخدم (اختياري)
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-                placeholder="ahmed_dev"
-                dir="ltr"
-                className={`w-full pl-8 pr-3.5 py-2.5 text-sm rounded-xl outline-hidden border font-mono transition-all ${
-                  theme === 'light'
-                    ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#2481cc]'
-                    : 'bg-[#242f3d] border-[#2b3a4a] text-white focus:border-[#2481cc]'
-                }`}
-              />
-              <span className="absolute left-3 top-2.5 text-xs text-[#7f91a4] font-mono">@</span>
+        {mode === 'login' ? (
+          <form onSubmit={handleLoginSubmit} className="space-y-4 text-right">
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 opacity-80">
+                اسم المستخدم أو رقم الهاتف
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 text-[#7f91a4] absolute right-3.5 top-3" />
+                <input
+                  type="text"
+                  required
+                  autoComplete="username"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="مثال: jehan أو 0501234567"
+                  dir="ltr"
+                  className={`${inputClass} font-mono text-right`}
+                />
+              </div>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-3 rounded-xl bg-[#2481cc] hover:bg-[#2172b5] text-white font-bold text-sm shadow-md transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-50"
-          >
-            {isSubmitting ? 'جاري الدخول...' : 'دخول فوري إلى تيليجرام'}
-          </button>
-        </form>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 opacity-80">كلمة المرور</label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#7f91a4] absolute right-3.5 top-3" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  dir="ltr"
+                  className={`${inputClass} pl-10 text-right`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((p) => !p)}
+                  className="absolute left-3 top-2.5 text-[#7f91a4] hover:text-white cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
 
-        <div className="relative flex py-2 items-center">
-          <div className="grow border-t border-white/10"></div>
-          <span className="shrink mx-3 text-[11px] text-[#7f91a4]">أو</span>
-          <div className="grow border-t border-white/10"></div>
-        </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full py-3 rounded-xl bg-[#2481cc] hover:bg-[#2172b5] text-white font-bold text-sm shadow-md transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-50"
+            >
+              {isSubmitting ? 'جاري التحقق والدخول...' : 'تسجيل الدخول إلى JanaX'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleRegisterSubmit} className="space-y-3.5 text-right">
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 opacity-80">
+                الاسم الكامل (اختياري)
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 text-[#7f91a4] absolute right-3.5 top-3" />
+                <input
+                  type="text"
+                  autoComplete="name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="مثال: أحمد محمد"
+                  className={inputClass}
+                />
+              </div>
+            </div>
 
-        {/* Google Login Button */}
-        <button
-          onClick={handleGoogleLogin}
-          disabled={isSubmitting}
-          className={`w-full py-2.5 px-4 rounded-xl border flex items-center justify-center gap-3 text-xs font-semibold transition-all hover:bg-white/5 cursor-pointer disabled:opacity-50 ${
-            theme === 'light' ? 'border-gray-300 text-gray-700' : 'border-[#2b3a4a] text-white'
-          }`}
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-            />
-          </svg>
-          <span>تسجيل الدخول عبر حساب Google</span>
-        </button>
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 opacity-80">رقم الهاتف</label>
+              <div className="relative">
+                <Phone className="w-4 h-4 text-[#7f91a4] absolute right-3.5 top-3" />
+                <input
+                  type="tel"
+                  required
+                  autoComplete="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+966 50 123 4567"
+                  dir="ltr"
+                  className={`${inputClass} font-mono text-right`}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 opacity-80">
+                كلمة المرور (6 أحرف فأكثر)
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#7f91a4] absolute right-3.5 top-3" />
+                <input
+                  type={showRegPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  placeholder="••••••••"
+                  dir="ltr"
+                  className={`${inputClass} pl-10 text-right`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRegPassword((p) => !p)}
+                  className="absolute left-3 top-2.5 text-[#7f91a4] hover:text-white cursor-pointer"
+                >
+                  {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 opacity-80">
+                تأكيد كلمة المرور
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#7f91a4] absolute right-3.5 top-3" />
+                <input
+                  type={showRegPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  value={regConfirmPassword}
+                  onChange={(e) => setRegConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  dir="ltr"
+                  className={`${inputClass} pl-10 text-right`}
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full py-3 rounded-xl bg-[#2481cc] hover:bg-[#2172b5] text-white font-bold text-sm shadow-md transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-50"
+            >
+              {isSubmitting ? 'جاري إنشاء الحساب...' : 'إنشاء حساب برقم الهاتف'}
+            </button>
+          </form>
+        )}
+
+        <p className="mt-5 text-[11px] text-[#7f91a4] leading-relaxed">
+          {mode === 'login' ? (
+            <>
+              ليس لديك حساب؟{' '}
+              <button
+                type="button"
+                onClick={() => switchMode('register')}
+                className="text-[#2481cc] hover:underline font-bold cursor-pointer"
+              >
+                أنشئ حساباً برقم الهاتف الآن
+              </button>
+            </>
+          ) : (
+            <>
+              لديك حساب مسجل بالفعل؟{' '}
+              <button
+                type="button"
+                onClick={() => switchMode('login')}
+                className="text-[#2481cc] hover:underline font-bold cursor-pointer"
+              >
+                تسجيل الدخول
+              </button>
+            </>
+          )}
+        </p>
       </div>
     </div>
   );
