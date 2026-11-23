@@ -8,7 +8,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(() => {
   return {
-    // مهم جداً لـ GitHub Pages
+    // مهم جداً لـ GitHub 
     // لأن التطبيق يعمل داخل /Jana/
     base: '/Jana/',
 
