@@ -28,6 +28,18 @@ service cloud.firestore {
       );
     }
 
+    function isChatModeratorData(chatData) {
+      return isSignedIn() && (
+        isAdmin() ||
+        chatData.createdBy == request.auth.uid ||
+        (chatData.keys().hasAny(['adminIds']) && chatData.adminIds is list && request.auth.uid in chatData.adminIds)
+      );
+    }
+
+    function isNotBannedFromChatData(chatData) {
+      return !(chatData.keys().hasAny(['bannedIds']) && chatData.bannedIds is list && request.auth.uid in chatData.bannedIds);
+    }
+
     // Connection testing
     match /test/connection {
       allow read: if true;
@@ -51,7 +63,12 @@ service cloud.firestore {
         isAdmin()
       );
       allow update: if isValidId(userId) && isSignedIn() && (
-        (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'uid', 'username'])) ||
+        (isOwner(userId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'uid', 'username', 'createdAt', 'createdBy']) &&
+          (!request.resource.data.keys().hasAny(['blockedUserIds']) || (request.resource.data.blockedUserIds is list && request.resource.data.blockedUserIds.size() <= 200)) &&
+          (!request.resource.data.keys().hasAny(['mutedChatIds']) || (request.resource.data.mutedChatIds is list && request.resource.data.mutedChatIds.size() <= 500)) &&
+          (!request.resource.data.keys().hasAny(['pinnedChatIds']) || (request.resource.data.pinnedChatIds is list && request.resource.data.pinnedChatIds.size() <= 50))
+        ) ||
         isAdmin()
       );
       allow delete: if isValidId(userId) && isAdmin() && userId != request.auth.uid;
@@ -140,36 +157,73 @@ service cloud.firestore {
         data.createdAt.size() <= 50;
     }
 
-    // Global calculator lock public hash (no plaintext PIN exposed; single-doc get for verification before login)
-    match /appConfig/{configId} {
-      allow get: if isValidId(configId) && configId == 'calculatorLock';
-      allow list: if false;
-      allow create, update: if isValidId(configId) && configId == 'calculatorLock' && isAdmin() &&
-        isValidCalculatorLockPublic(request.resource.data);
-      allow delete: if false;
+    function isValidCall(data, callId) {
+      return data.keys().hasAll(['id', 'chatId', 'callerId', 'callerName', 'calleeIds', 'isVideo', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'chatId', 'callerId', 'callerName', 'callerPhoto', 'calleeIds', 'isVideo', 'status', 'offer', 'answer', 'createdAt', 'updatedAt', 'endedAt']) &&
+        data.id == callId &&
+        isValidId(data.id) &&
+        isValidId(data.chatId) &&
+        isValidId(data.callerId) &&
+        data.callerName is string &&
+        data.callerName.size() <= 100 &&
+        data.calleeIds is list &&
+        data.calleeIds.size() >= 1 &&
+        data.calleeIds.size() <= 20 &&
+        data.isVideo is bool &&
+        data.status in ['ringing', 'connected', 'ended', 'declined', 'missed'] &&
+        data.createdAt is string &&
+        data.createdAt.size() <= 50 &&
+        data.updatedAt is string &&
+        data.updatedAt.size() <= 50;
     }
 
-    // Admin-only calculator lock configuration (stores active PIN for Admin management)
-    match /adminConfig/{configId} {
-      allow get: if isValidId(configId) && configId == 'calculatorLock' && isAdmin();
+    function isValidCallCandidate(data) {
+      return data.keys().hasAll(['senderId', 'candidate', 'createdAt']) &&
+        data.keys().hasOnly(['senderId', 'candidate', 'createdAt']) &&
+        data.senderId == request.auth.uid &&
+        data.candidate is map &&
+        data.createdAt is string &&
+        data.createdAt.size() <= 50;
+    }
+
+    // Global calculator lock & decoy lock public hashes (single-doc get only)
+    match /appConfig/{configId} {
+      allow get: if isValidId(configId) && (configId == 'calculatorLock' || configId == 'decoyLock');
       allow list: if false;
-      allow create, update: if isValidId(configId) && configId == 'calculatorLock' && isAdmin() &&
+      allow create, update: if isValidId(configId) && (configId == 'calculatorLock' || configId == 'decoyLock') && isAdmin() &&
+        isValidCalculatorLockPublic(request.resource.data);
+      allow delete: if isValidId(configId) && configId == 'decoyLock' && isAdmin();
+    }
+
+    // Admin-only calculator lock & decoy lock configuration
+    match /adminConfig/{configId} {
+      allow get: if isValidId(configId) && (configId == 'calculatorLock' || configId == 'decoyLock') && isAdmin();
+      allow list: if false;
+      allow create, update: if isValidId(configId) && (configId == 'calculatorLock' || configId == 'decoyLock') && isAdmin() &&
         isValidCalculatorLockAdmin(request.resource.data);
-      allow delete: if false;
+      allow delete: if isValidId(configId) && configId == 'decoyLock' && isAdmin();
     }
 
     // Group Invites lookup (requires knowing exact inviteCode)
     match /groupInvites/{inviteCode} {
       allow get: if isValidId(inviteCode) && isSignedIn();
       allow list: if false;
-      allow create, update: if isValidId(inviteCode) && isSignedIn() && request.resource.data.createdBy == request.auth.uid;
-      allow delete: if isValidId(inviteCode) && isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow create, update: if isValidId(inviteCode) && isSignedIn() && (
+        request.resource.data.createdBy == request.auth.uid ||
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/chats/$(request.resource.data.chatId)) &&
+          isChatModeratorData(get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data))
+      );
+      allow delete: if isValidId(inviteCode) && isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/chats/$(resource.data.chatId)) &&
+          isChatModeratorData(get(/databases/$(database)/documents/chats/$(resource.data.chatId)).data))
+      );
     }
 
     // Chats collection
     match /chats/{chatId} {
-      // Allow get when doc does not exist yet (resource == null, e.g., before creating saved_ or dm_ chat)
-      // or when the signed-in user is a member, creator, channel viewer, or joining a group with an inviteCode.
       allow get: if isValidId(chatId) && isSignedIn() && (
         resource == null ||
         resource.data.type == 'channel' ||
@@ -188,16 +242,21 @@ service cloud.firestore {
         request.auth.uid in request.resource.data.memberIds;
 
       allow update: if isValidId(chatId) && isSignedIn() && (
-        resource.data.type == 'channel' ||
-        request.auth.uid in resource.data.memberIds ||
-        resource.data.createdBy == request.auth.uid ||
-        (
-          resource.data.type == 'group' &&
-          resource.data.inviteCode != null &&
+        // Tier 1: Chat creator, group/channel admin, or system admin
+        isChatModeratorData(resource.data) ||
+        // Tier 2: Active chat member sending messages, reading, or pinning
+        (request.auth.uid in resource.data.memberIds &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'updatedAt', 'unreadCounts', 'pinnedMessageId'])) ||
+        // Tier 3: Active member leaving group or unsubscribing from channel
+        (request.auth.uid in resource.data.memberIds &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'membersCount', 'updatedAt']) &&
+          !(request.auth.uid in request.resource.data.memberIds)) ||
+        // Tier 4: Joining group via invite or subscribing to public channel (blocked if banned)
+        ((resource.data.type == 'channel' || (resource.data.type == 'group' && resource.data.inviteCode != null)) &&
+          isNotBannedFromChatData(resource.data) &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'membersCount', 'updatedAt']) &&
           request.auth.uid in request.resource.data.memberIds &&
-          request.resource.data.memberIds.hasAll(resource.data.memberIds)
-        )
+          request.resource.data.memberIds.hasAll(resource.data.memberIds))
       );
 
       allow delete: if isValidId(chatId) && isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
@@ -227,17 +286,28 @@ service cloud.firestore {
         allow create: if isValidId(chatId) && isValidId(messageId) && isSignedIn() &&
           request.resource.data.senderId == request.auth.uid &&
           exists(/databases/$(database)/documents/chats/$(chatId)) &&
-          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds;
-        allow update: if isValidId(chatId) && isValidId(messageId) && isSignedIn() &&
-          exists(/databases/$(database)/documents/chats/$(chatId)) &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds && (
-            resource.data.senderId == request.auth.uid ||
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'isPinned', 'pollData', 'readBy'])
+            get(/databases/$(database)/documents/chats/$(chatId)).data.type != 'channel' ||
+            isChatModeratorData(get(/databases/$(database)/documents/chats/$(chatId)).data)
           );
-        allow delete: if false;
+        allow update: if isValidId(chatId) && isValidId(messageId) && isSignedIn() &&
+          exists(/databases/$(database)/documents/chats/$(chatId)) && (
+            (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds && (
+              resource.data.senderId == request.auth.uid ||
+              isChatModeratorData(get(/databases/$(database)/documents/chats/$(chatId)).data) ||
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'isPinned', 'pollData', 'readBy', 'deletedFor'])
+            )) ||
+            (get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'channel' &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'pollData']))
+          );
+        allow delete: if isValidId(chatId) && isValidId(messageId) && isSignedIn() &&
+          exists(/databases/$(database)/documents/chats/$(chatId)) && (
+            resource.data.senderId == request.auth.uid ||
+            isChatModeratorData(get(/databases/$(database)/documents/chats/$(chatId)).data)
+          );
       }
 
-      // Real-time typing indicators sub-collection
+      // Real-time typing & recording indicators sub-collection
       match /typing/{userId} {
         allow get: if isValidId(chatId) && isValidId(userId) && isSignedIn() &&
           exists(/databases/$(database)/documents/chats/$(chatId)) && (
@@ -257,11 +327,12 @@ service cloud.firestore {
             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds
           ) &&
           request.resource.data.keys().hasAll(['uid', 'displayName', 'isTyping', 'updatedAt']) &&
-          request.resource.data.keys().hasOnly(['uid', 'displayName', 'isTyping', 'updatedAt']) &&
+          request.resource.data.keys().hasOnly(['uid', 'displayName', 'isTyping', 'activity', 'updatedAt']) &&
           request.resource.data.uid == request.auth.uid &&
           request.resource.data.displayName is string &&
           request.resource.data.displayName.size() <= 100 &&
           request.resource.data.isTyping is bool &&
+          (!request.resource.data.keys().hasAny(['activity']) || request.resource.data.activity in ['typing', 'recording']) &&
           request.resource.data.updatedAt is string &&
           request.resource.data.updatedAt.size() <= 50;
         allow delete: if isValidId(chatId) && isValidId(userId) && isOwner(userId);
@@ -277,6 +348,45 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewedBy'])
       );
       allow delete: if isValidId(storyId) && isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // WebRTC Calls signaling collection
+    match /calls/{callId} {
+      allow get: if isValidId(callId) && isSignedIn() && (
+        resource == null ||
+        resource.data.callerId == request.auth.uid ||
+        request.auth.uid in resource.data.calleeIds
+      );
+      allow list: if isSignedIn() && (
+        resource.data.callerId == request.auth.uid ||
+        request.auth.uid in resource.data.calleeIds
+      );
+      allow create: if isValidId(callId) && isSignedIn() &&
+        isValidCall(request.resource.data, callId) &&
+        request.resource.data.callerId == request.auth.uid;
+      allow update: if isValidId(callId) && isSignedIn() &&
+        isValidCall(request.resource.data, callId) &&
+        request.resource.data.id == resource.data.id &&
+        request.resource.data.chatId == resource.data.chatId &&
+        request.resource.data.callerId == resource.data.callerId &&
+        (resource.data.callerId == request.auth.uid || request.auth.uid in resource.data.calleeIds);
+
+      match /candidates/{candidateId} {
+        allow get, list: if isValidId(callId) && isSignedIn() &&
+          exists(/databases/$(database)/documents/calls/$(callId)) && (
+            get(/databases/$(database)/documents/calls/$(callId)).data.callerId == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.calleeIds
+          );
+        allow create: if isValidId(callId) && isValidId(candidateId) && isSignedIn() &&
+          isValidCallCandidate(request.resource.data) &&
+          exists(/databases/$(database)/documents/calls/$(callId)) && (
+            get(/databases/$(database)/documents/calls/$(callId)).data.callerId == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.calleeIds
+          );
+        allow delete: if isValidId(callId) && isValidId(candidateId) && isSignedIn() &&
+          exists(/databases/$(database)/documents/calls/$(callId)) &&
+          get(/databases/$(database)/documents/calls/$(callId)).data.callerId == request.auth.uid;
+      }
     }
   }
 }

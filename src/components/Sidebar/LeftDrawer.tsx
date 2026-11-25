@@ -67,29 +67,33 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
       {/* Drawer Panel */}
       <div
         className={`relative z-10 w-80 max-w-[85vw] h-full flex flex-col shadow-2xl transition-transform duration-300 ease-in-out ${
-          theme === 'light' ? 'bg-white text-gray-900' : 'bg-[#17212b] text-white'
+          theme === 'light' ? 'bg-white text-slate-900' : 'bg-[#111923] text-white'
         }`}
       >
         {/* User Info Header */}
         <div
-          className={`p-5 flex flex-col justify-end relative ${
-            theme === 'light' ? 'bg-[#2481cc] text-white' : 'bg-[#232e3c] text-white'
+          className={`p-5 flex flex-col justify-end relative border-b ${
+            theme === 'light'
+              ? 'bg-[#2481cc] border-[#1d6eb0] text-white'
+              : 'bg-[#162230] border-white/[0.06] text-white'
           }`}
         >
           <button
+            type="button"
             onClick={onClose}
-            className="absolute top-4 left-4 p-1.5 rounded-full hover:bg-white/10 transition-colors"
+            className="absolute top-4 left-4 min-h-[36px] min-w-[36px] rounded-xl hover:bg-white/10 transition-colors flex items-center justify-center cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
 
           {/* Avatar (Click to change photo in Settings) */}
           <button
+            type="button"
             onClick={() => {
               onClose();
               onOpenSettings();
             }}
-            className="relative w-16 h-16 rounded-full mb-3 flex items-center justify-center font-bold text-xl text-white shadow-md overflow-hidden bg-gradient-to-tr from-[#2481cc] to-[#43b5e4] group cursor-pointer text-right"
+            className="relative w-16 h-16 rounded-full mb-3 flex items-center justify-center font-bold text-xl text-white shadow-md ring-2 ring-white/20 overflow-hidden bg-gradient-to-tr from-[#2481cc] to-[#43b5e4] group cursor-pointer text-right"
             title="تغيير صورة البروفايل"
           >
             {userProfile?.photoURL ? (
@@ -112,8 +116,8 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
               {userProfile?.displayName || 'مستخدم JanaX'}
             </div>
             {isAdmin && (
-              <span className="px-2 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-bold">
-                Admin
+              <span className="px-2 py-0.5 rounded-md bg-white/20 text-white text-[10px] font-bold">
+                مشرف
               </span>
             )}
           </div>
@@ -121,120 +125,140 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
             @{userProfile?.username || 'user'}
           </div>
           {userProfile?.phone && (
-            <div className="text-xs text-white/70 mt-1" dir="ltr">
+            <div className="text-xs text-white/75 font-mono mt-1" dir="ltr">
               {userProfile.phone}
             </div>
           )}
         </div>
 
         {/* Menu Items List */}
-        <div className="flex-1 overflow-y-auto py-2">
+        <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
           {/* Admin Account Management */}
           {isAdmin && (
             <>
               {onOpenRegisteredAccounts && (
                 <button
+                  type="button"
                   onClick={() => {
                     onClose();
                     onOpenRegisteredAccounts();
                   }}
-                  className="w-full flex items-center gap-4 px-5 py-3 hover:bg-[#2481cc]/15 text-[#2481cc] transition-colors text-right cursor-pointer"
+                  className="w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl hover:bg-[#2481cc]/12 text-[#2481cc] transition-colors text-right cursor-pointer"
                 >
-                  <Users className="w-5 h-5" />
+                  <Users className="w-5 h-5 shrink-0" />
                   <span className="text-sm font-bold">شاشة الحسابات المسجلة وإدارتها</span>
                 </button>
               )}
               <button
+                type="button"
                 onClick={() => {
                   onClose();
                   onOpenAdminUsers();
                 }}
-                className="w-full flex items-center gap-4 px-5 py-3 hover:bg-[#2481cc]/15 text-[#2481cc] transition-colors text-right cursor-pointer"
+                className="w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl hover:bg-[#2481cc]/12 text-[#2481cc] transition-colors text-right cursor-pointer"
               >
-                <Shield className="w-5 h-5" />
+                <Shield className="w-5 h-5 shrink-0" />
                 <span className="text-sm font-bold">لوحة الأدمن (إنشاء حساب ورمز الحاسبة)</span>
               </button>
-              <hr className={`my-1 ${theme === 'light' ? 'border-gray-100' : 'border-[#232e3c]'}`} />
+              <hr className={`my-1.5 ${theme === 'light' ? 'border-slate-100' : 'border-white/[0.06]'}`} />
             </>
           )}
 
           {/* Direct chat */}
           <button
+            type="button"
             onClick={() => {
               onClose();
               onOpenNewChat();
             }}
-            className="w-full flex items-center gap-4 px-5 py-3 hover:bg-white/5 transition-colors text-right cursor-pointer"
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl transition-colors text-right cursor-pointer ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-white/[0.06]'
+            }`}
           >
-            <MessageSquare className="w-5 h-5 text-[#2481cc]" />
+            <MessageSquare className="w-5 h-5 text-[#2481cc] shrink-0" />
             <span className="text-sm font-medium">محادثة خاصة جديدة</span>
           </button>
 
           {/* Group */}
           <button
+            type="button"
             onClick={() => {
               onClose();
               onOpenNewGroup();
             }}
-            className="w-full flex items-center gap-4 px-5 py-3 hover:bg-white/5 transition-colors text-right cursor-pointer"
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl transition-colors text-right cursor-pointer ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-white/[0.06]'
+            }`}
           >
-            <Users className="w-5 h-5 text-[#2481cc]" />
+            <Users className="w-5 h-5 text-[#2481cc] shrink-0" />
             <span className="text-sm font-medium">مجموعة جديدة</span>
           </button>
 
           {/* Join Group via Link */}
           <button
+            type="button"
             onClick={() => {
               onClose();
               onOpenJoinGroup();
             }}
-            className="w-full flex items-center gap-4 px-5 py-3 hover:bg-white/5 transition-colors text-right cursor-pointer"
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl transition-colors text-right cursor-pointer ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-white/[0.06]'
+            }`}
           >
-            <Link2 className="w-5 h-5 text-[#2481cc]" />
+            <Link2 className="w-5 h-5 text-[#2481cc] shrink-0" />
             <span className="text-sm font-medium">انضمام لمجموعة برابط</span>
           </button>
 
           {/* Channel */}
           <button
+            type="button"
             onClick={() => {
               onClose();
               onOpenNewChannel();
             }}
-            className="w-full flex items-center gap-4 px-5 py-3 hover:bg-white/5 transition-colors text-right cursor-pointer"
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl transition-colors text-right cursor-pointer ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-white/[0.06]'
+            }`}
           >
-            <Megaphone className="w-5 h-5 text-[#2481cc]" />
+            <Megaphone className="w-5 h-5 text-[#2481cc] shrink-0" />
             <span className="text-sm font-medium">قناة جديدة</span>
           </button>
 
           {/* Saved Messages */}
           <button
+            type="button"
             onClick={handleOpenSaved}
-            className="w-full flex items-center gap-4 px-5 py-3 hover:bg-white/5 transition-colors text-right cursor-pointer"
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl transition-colors text-right cursor-pointer ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-white/[0.06]'
+            }`}
           >
-            <Bookmark className="w-5 h-5 text-[#2481cc]" />
+            <Bookmark className="w-5 h-5 text-[#2481cc] shrink-0" />
             <span className="text-sm font-medium">الرسائل المحفوظة</span>
           </button>
 
-          <hr className={`my-2 ${theme === 'light' ? 'border-gray-100' : 'border-[#232e3c]'}`} />
+          <hr className={`my-1.5 ${theme === 'light' ? 'border-slate-100' : 'border-white/[0.06]'}`} />
 
           {/* Night Mode Toggle */}
           <button
+            type="button"
             onClick={toggleTheme}
-            className="w-full flex items-center justify-between px-5 py-3 hover:bg-white/5 transition-colors text-right cursor-pointer"
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors text-right cursor-pointer ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-white/[0.06]'
+            }`}
           >
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3.5">
               {theme === 'dark' ? (
                 <Moon className="w-5 h-5 text-[#e5a643]" />
               ) : (
                 <Sun className="w-5 h-5 text-[#e5a643]" />
               )}
               <span className="text-sm font-medium">
-                {theme === 'dark' ? 'الوضع الليلي (مفعل)' : 'الوضع النهاري (مفعل)'}
+                {theme === 'dark' ? 'الوضع الليلي' : 'الوضع النهاري'}
               </span>
             </div>
             <div
               className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
-                theme === 'dark' ? 'bg-[#2481cc]' : 'bg-gray-300'
+                theme === 'dark' ? 'bg-[#2481cc]' : 'bg-slate-300'
               }`}
             >
               <div
@@ -247,51 +271,58 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
           {/* Settings */}
           <button
+            type="button"
             onClick={() => {
               onClose();
               onOpenSettings();
             }}
-            className="w-full flex items-center gap-4 px-5 py-3 hover:bg-white/5 transition-colors text-right cursor-pointer"
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl transition-colors text-right cursor-pointer ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-white/[0.06]'
+            }`}
           >
-            <Settings className="w-5 h-5 text-[#7f91a4]" />
+            <Settings className="w-5 h-5 text-[#8496ab] shrink-0" />
             <span className="text-sm font-medium">تغيير الصورة والإعدادات</span>
           </button>
 
           {onLockToCalculator && (
             <button
+              type="button"
               onClick={() => {
                 onClose();
                 onLockToCalculator();
               }}
-              className="w-full flex items-center gap-4 px-5 py-3 hover:bg-amber-500/10 text-amber-400 transition-colors text-right cursor-pointer"
+              className="w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl hover:bg-amber-500/12 text-amber-500 transition-colors text-right cursor-pointer"
             >
-              <Calculator className="w-5 h-5" />
+              <Calculator className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">إخفاء التطبيق (الآلة الحاسبة)</span>
             </button>
           )}
 
-          <hr className={`my-2 ${theme === 'light' ? 'border-gray-100' : 'border-[#232e3c]'}`} />
+          <hr className={`my-1.5 ${theme === 'light' ? 'border-slate-100' : 'border-white/[0.06]'}`} />
 
           {/* Logout */}
           <button
+            type="button"
             onClick={async () => {
               onClose();
               await logout('', true);
             }}
-            className="w-full flex items-center gap-4 px-5 py-3 hover:bg-red-500/10 text-red-400 transition-colors text-right cursor-pointer"
+            className="w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl hover:bg-red-500/12 text-red-400 transition-colors text-right cursor-pointer"
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut className="w-5 h-5 shrink-0" />
             <span className="text-sm font-medium">تسجيل الخروج</span>
           </button>
         </div>
 
         {/* Footer */}
         <div
-          className={`p-4 text-center text-xs text-[#7f91a4] border-t ${
-            theme === 'light' ? 'border-gray-100' : 'border-[#232e3c]'
+          className={`p-3.5 text-center text-xs border-t ${
+            theme === 'light'
+              ? 'border-slate-100 text-slate-400'
+              : 'border-white/[0.06] text-[#8496ab]'
           }`}
         >
-          JanaX Cloud Messenger • v2.0
+          JanaX
         </div>
       </div>
     </div>

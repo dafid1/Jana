@@ -2,61 +2,73 @@
 
 @layer base {
   :root {
-    --tg-bg-sidebar: #17212b;
-    --tg-bg-chat: #0e1621;
-    --tg-bg-input: #17212b;
+    --tg-bg-sidebar: #111923;
+    --tg-bg-chat: #0b1118;
+    --tg-bg-input: #111923;
     --tg-primary: #2b5278;
     --tg-accent: #2481cc;
-    --tg-accent-hover: #2172b5;
-    --tg-bubble-out: #2b5278;
-    --tg-bubble-in: #182533;
-    --tg-text: #f5f5f5;
-    --tg-text-muted: #7f91a4;
-    --tg-border: #232e3c;
-    --tg-active: #2b5278;
+    --tg-accent-hover: #1e73b8;
+    --tg-bubble-out: #244a70;
+    --tg-bubble-in: #162230;
+    --tg-text: #f3f6fa;
+    --tg-text-muted: #8496ab;
+    --tg-border: rgba(255, 255, 255, 0.07);
+    --tg-active: #203247;
     --tg-badge: #2481cc;
   }
 
   .theme-light {
     --tg-bg-sidebar: #ffffff;
-    --tg-bg-chat: #8ca388;
+    --tg-bg-chat: #d6e0d5;
     --tg-bg-input: #ffffff;
     --tg-primary: #2481cc;
     --tg-accent: #2481cc;
-    --tg-accent-hover: #1f72b5;
-    --tg-bubble-out: #effdde;
+    --tg-accent-hover: #1d6eb0;
+    --tg-bubble-out: #ebfad6;
     --tg-bubble-in: #ffffff;
-    --tg-text: #111827;
-    --tg-text-muted: #707579;
-    --tg-border: #e3e5e8;
-    --tg-active: #f1f1f1;
-    --tg-badge: #4fae4e;
+    --tg-text: #0f172a;
+    --tg-text-muted: #64748b;
+    --tg-border: rgba(15, 23, 42, 0.08);
+    --tg-active: #eef4fa;
+    --tg-badge: #3b9c48;
   }
 }
 
 body {
-  font-family: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Cairo', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   user-select: none;
   -webkit-user-select: none;
   touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Telegram Subtle Pattern Background */
+.font-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Refined Architectural Telegram Chat Canvases */
 .telegram-doodle-dark {
-  background-color: #0e1621;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-                    radial-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-  background-size: 32px 32px;
-  background-position: 0 0, 16px 16px;
+  background-color: #0b1118;
+  background-image:
+    radial-gradient(ellipse at 50% 0%, rgba(36, 129, 204, 0.09) 0%, transparent 65%),
+    radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 100% 100%, 30px 30px, 15px 15px;
+  background-position: 0 0, 0 0, 15px 15px;
 }
 
 .telegram-doodle-light {
-  background-color: #8da48f;
-  background-image: radial-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px);
-  background-size: 28px 28px;
+  background-color: #d7e2d7;
+  background-image:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.45) 0%, transparent 70%),
+    radial-gradient(rgba(15, 23, 42, 0.055) 1px, transparent 1px),
+    radial-gradient(rgba(15, 23, 42, 0.025) 1px, transparent 1px);
+  background-size: 100% 100%, 28px 28px, 14px 14px;
+  background-position: 0 0, 0 0, 14px 14px;
 }
 
-/* Telegram Slim Scrollbar */
+/* Precision Slim Scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -67,26 +79,26 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.22);
+  border-radius: 9999px;
 }
 
 .theme-light ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(15, 23, 42, 0.16);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(148, 163, 184, 0.36);
 }
 
 /* Custom waveform animation for voice notes */
 @keyframes tgWave {
-  0%, 100% { height: 20%; }
+  0%, 100% { height: 22%; }
   50% { height: 100%; }
 }
 
 .animate-tg-wave {
-  animation: tgWave 0.8s ease-in-out infinite;
+  animation: tgWave 0.75s ease-in-out infinite;
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -100,4 +112,14 @@ body {
 .smooth-scroll-area {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

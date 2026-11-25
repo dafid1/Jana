@@ -33,6 +33,7 @@ import {
   isUserOnlineByLastSeen,
   formatLastSeenArabic,
 } from '../../utils/telegramHelpers';
+import { useBackHandler } from '../../utils/androidBackNavigation';
 
 interface AdminAccountsScreenProps {
   isOpen: boolean;
@@ -55,6 +56,8 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
     adminCredentialsMap,
     adminCalculatorPin,
     calculatorPinVersion,
+    adminDecoyPin,
+    decoyPinVersion,
     currentUser,
     createAccountByAdmin,
     getUserCredentialByAdmin,
@@ -62,6 +65,8 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
     updateUserPasswordByAdmin,
     deleteUserProfileByAdmin,
     updateCalculatorPinByAdmin,
+    updateDecoyPinByAdmin,
+    disableDecoyPinByAdmin,
   } = useAuth();
   const { startDirectChat } = useChat();
 
@@ -121,6 +126,14 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
   const [newCalcPin, setNewCalcPin] = useState('');
   const [isUpdatingCalcPin, setIsUpdatingCalcPin] = useState(false);
   const [calcPinFeedback, setCalcPinFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [newDecoyPin, setNewDecoyPin] = useState('');
+  const [isUpdatingDecoyPin, setIsUpdatingDecoyPin] = useState(false);
+  const [decoyPinFeedback, setDecoyPinFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useBackHandler(isOpen && confirmDeleteUid !== null, () => setConfirmDeleteUid(null), 78);
+  useBackHandler(isOpen && showCalcPinPanel, () => setShowCalcPinPanel(false), 77);
+  useBackHandler(isOpen && showCreatePanel, () => setShowCreatePanel(false), 76);
+  useBackHandler(isOpen && mobileShowDetail, () => setMobileShowDetail(false), 75);
 
   useEffect(() => {
     if (isOpen) {
@@ -131,6 +144,7 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
       setProfileFeedback(null);
       setPasswordFeedback(null);
       setCalcPinFeedback(null);
+      setDecoyPinFeedback(null);
       setCreateError('');
     }
   }, [isOpen, initialOpenCreate]);
@@ -381,6 +395,58 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
     }
   };
 
+  const handleUpdateDecoyPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDecoyPinFeedback(null);
+    const sanitized = newDecoyPin
+      .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+      .replace(/\D/g, '')
+      .slice(0, 12);
+
+    if (sanitized.length < 4 || sanitized.length > 12) {
+      setDecoyPinFeedback({ type: 'error', text: 'يجب أن يتكون رمز الطوارئ الوهمي من 4 إلى 12 رقماً' });
+      return;
+    }
+
+    setIsUpdatingDecoyPin(true);
+    try {
+      await updateDecoyPinByAdmin(sanitized);
+      setNewDecoyPin('');
+      setDecoyPinFeedback({
+        type: 'success',
+        text: `تم تفعيل رمز الطوارئ الوهمي (${sanitized}) — عند إدخاله ستفتح واجهة المهام الوهمية.`,
+      });
+    } catch (err: unknown) {
+      setDecoyPinFeedback({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'تعذر تحديث رمز الطوارئ الوهمي',
+      });
+    } finally {
+      setIsUpdatingDecoyPin(false);
+    }
+  };
+
+  const handleDisableDecoyPin = async () => {
+    setDecoyPinFeedback(null);
+    setIsUpdatingDecoyPin(true);
+    try {
+      await disableDecoyPinByAdmin();
+      setNewDecoyPin('');
+      setDecoyPinFeedback({
+        type: 'success',
+        text: 'تم تعطيل رمز الطوارئ الوهمي بنجاح.',
+      });
+    } catch (err: unknown) {
+      setDecoyPinFeedback({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'تعذر تعطيل الرمز الوهمي',
+      });
+    } finally {
+      setIsUpdatingDecoyPin(false);
+    }
+  };
+
   const handleConfirmDelete = async (uid: string) => {
     setIsDeleting(true);
     try {
@@ -410,19 +476,19 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
     handleCopy(`all_${user.uid}`, lines.join('\n'));
   };
 
-  const surfaceBg = theme === 'light' ? 'bg-[#f3f6f9] text-gray-900' : 'bg-[#0e1621] text-white';
+  const surfaceBg = theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-[#0b1118] text-white';
   const cardBg =
     theme === 'light'
-      ? 'bg-white border-gray-200 shadow-xs'
-      : 'bg-[#17212b] border-[#232e3c]';
+      ? 'bg-white border-slate-200/80 shadow-xs'
+      : 'bg-[#111923] border-white/[0.06]';
   const subCardBg =
     theme === 'light'
-      ? 'bg-gray-50 border-gray-200'
-      : 'bg-[#1e2a38] border-[#2b3a4a]';
+      ? 'bg-slate-50 border-slate-200/80'
+      : 'bg-[#162230] border-white/[0.07]';
   const inputCls =
     theme === 'light'
-      ? 'bg-white border-gray-200 text-gray-900 placeholder-gray-400 focus:border-[#2481cc]'
-      : 'bg-[#242f3d] border-[#2b3a4a] text-white placeholder-[#7f91a4] focus:border-[#2481cc]';
+      ? 'bg-white border-slate-200/80 text-slate-900 placeholder-slate-400 focus:border-[#2481cc]'
+      : 'bg-[#1a2533] border-white/[0.07] text-white placeholder-[#7f91a4] focus:border-[#2481cc]';
 
   const filterTabs: { id: AccountFilter; label: string }[] = [
     { id: 'all', label: `الكل (${allUsers.length})` },
@@ -436,8 +502,10 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
     <div className={`fixed inset-0 z-50 flex flex-col select-none ${surfaceBg}`}>
       {/* Top Admin Header Bar */}
       <header
-        className={`shrink-0 border-b px-4 py-3 flex flex-wrap items-center justify-between gap-3 ${
-          theme === 'light' ? 'bg-white border-gray-200' : 'bg-[#17212b] border-[#232e3c]'
+        className={`shrink-0 border-b px-4 py-3 flex flex-wrap items-center justify-between gap-3 backdrop-blur-md ${
+          theme === 'light'
+            ? 'bg-white/95 border-slate-200/80'
+            : 'bg-[#111923]/95 border-white/[0.06]'
         }`}
       >
         <div className="flex items-center gap-3 min-w-0">
@@ -535,8 +603,8 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
               <Users className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] text-[#7f91a4]">إجمالي الحسابات</div>
-              <div className="text-base font-extrabold">{allUsers.length}</div>
+              <div className="text-[11px] text-[#8ea0b5]">إجمالي الحسابات</div>
+              <div className="text-base font-extrabold tabular-nums">{allUsers.length}</div>
             </div>
           </div>
 
@@ -545,8 +613,8 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
               <Clock className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] text-[#7f91a4]">المتصلون الآن</div>
-              <div className="text-base font-extrabold text-emerald-400">{onlineCount}</div>
+              <div className="text-[11px] text-[#8ea0b5]">المتصلون الآن</div>
+              <div className="text-base font-extrabold tabular-nums text-emerald-400">{onlineCount}</div>
             </div>
           </div>
 
@@ -555,8 +623,8 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
               <KeyRound className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] text-[#7f91a4]">كلمات مرور محفوظة</div>
-              <div className="text-base font-extrabold text-amber-400">
+              <div className="text-[11px] text-[#8ea0b5]">كلمات مرور محفوظة</div>
+              <div className="text-base font-extrabold tabular-nums text-amber-400">
                 {savedPasswordsCount} / {allUsers.length}
               </div>
             </div>
@@ -571,8 +639,8 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
               <Calculator className="w-4 h-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] text-[#7f91a4]">رمز الآلة الحاسبة</div>
-              <div className="text-base font-extrabold font-mono tracking-wider" dir="ltr">
+              <div className="text-[11px] text-[#8ea0b5]">رمز الآلة الحاسبة</div>
+              <div className="text-base font-extrabold font-mono tabular-nums tracking-wider" dir="ltr">
                 {adminCalculatorPin}
               </div>
             </div>
@@ -581,63 +649,135 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
 
         {/* Collapsible Global Calculator PIN Manager */}
         {showCalcPinPanel && (
-          <form
-            onSubmit={handleUpdateCalculatorPin}
-            className={`p-4 rounded-2xl border space-y-2.5 shrink-0 ${cardBg}`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
-                <Calculator className="w-4 h-4" />
-                <span>تغيير رمز الآلة الحاسبة لجميع الحسابات (الإصدار #{calculatorPinVersion})</span>
+          <div className={`p-4 rounded-2xl border space-y-4 shrink-0 ${cardBg}`}>
+            <form onSubmit={handleUpdateCalculatorPin} className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                  <Calculator className="w-4 h-4" />
+                  <span>تغيير رمز الآلة الحاسبة لجميع الحسابات (الإصدار #{calculatorPinVersion})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCalcPinPanel(false)}
+                  className="p-1 rounded-full text-[#7f91a4] hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowCalcPinPanel(false)}
-                className="p-1 rounded-full text-[#7f91a4] hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
 
-            {calcPinFeedback && (
-              <div
-                className={`p-2.5 rounded-xl text-xs border ${
-                  calcPinFeedback.type === 'success'
-                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                    : 'bg-red-500/15 border-red-500/30 text-red-400'
-                }`}
-              >
-                {calcPinFeedback.text}
+              {calcPinFeedback && (
+                <div
+                  className={`p-2.5 rounded-xl text-xs border ${
+                    calcPinFeedback.type === 'success'
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                      : 'bg-red-500/15 border-red-500/30 text-red-400'
+                  }`}
+                >
+                  {calcPinFeedback.text}
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={newCalcPin}
+                  onChange={(e) =>
+                    setNewCalcPin(
+                      e.target.value
+                        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+                        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+                        .replace(/\D/g, '')
+                        .slice(0, 12)
+                    )
+                  }
+                  placeholder="الرمز الجديد (4 إلى 12 رقماً)"
+                  dir="ltr"
+                  className={`flex-1 px-3 py-2 text-xs rounded-xl outline-hidden border font-mono ${inputCls}`}
+                />
+                <button
+                  type="submit"
+                  disabled={isUpdatingCalcPin || newCalcPin.length < 4}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {isUpdatingCalcPin ? 'جاري التحديث...' : 'اعتماد الرمز وتعطيل السابق'}
+                </button>
               </div>
-            )}
+            </form>
 
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={newCalcPin}
-                onChange={(e) =>
-                  setNewCalcPin(
-                    e.target.value
-                      .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-                      .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-                      .replace(/\D/g, '')
-                      .slice(0, 12)
-                  )
-                }
-                placeholder="الرمز الجديد (4 إلى 12 رقماً)"
-                dir="ltr"
-                className={`flex-1 px-3 py-2 text-xs rounded-xl outline-hidden border font-mono ${inputCls}`}
-              />
-              <button
-                type="submit"
-                disabled={isUpdatingCalcPin || newCalcPin.length < 4}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs cursor-pointer disabled:opacity-50 shrink-0"
-              >
-                {isUpdatingCalcPin ? 'جاري التحديث...' : 'اعتماد الرمز وتعطيل السابق'}
-              </button>
-            </div>
-          </form>
+            {/* Decoy / Panic PIN Section */}
+            <form
+              onSubmit={handleUpdateDecoyPin}
+              className="pt-3.5 border-t border-white/[0.07] space-y-2.5"
+            >
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 text-xs font-bold text-sky-400">
+                  <Shield className="w-4 h-4" />
+                  <span>رمز الطوارئ الوهمي (Decoy PIN)</span>
+                </div>
+                <span
+                  className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                    adminDecoyPin
+                      ? 'bg-emerald-500/15 text-emerald-400'
+                      : 'bg-slate-500/15 text-[#8ea0b5]'
+                  }`}
+                >
+                  {adminDecoyPin
+                    ? `مفعّل (${adminDecoyPin}) • الإصدار #${decoyPinVersion}`
+                    : 'غير مفعّل'}
+                </span>
+              </div>
+
+              {decoyPinFeedback && (
+                <div
+                  className={`p-2.5 rounded-xl text-xs border ${
+                    decoyPinFeedback.type === 'success'
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                      : 'bg-red-500/15 border-red-500/30 text-red-400'
+                  }`}
+                >
+                  {decoyPinFeedback.text}
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={newDecoyPin}
+                  onChange={(e) =>
+                    setNewDecoyPin(
+                      e.target.value
+                        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+                        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+                        .replace(/\D/g, '')
+                        .slice(0, 12)
+                    )
+                  }
+                  placeholder="رمز الطوارئ الوهمي (4 إلى 12 رقماً)"
+                  dir="ltr"
+                  className={`flex-1 px-3 py-2 text-xs rounded-xl outline-hidden border font-mono ${inputCls}`}
+                />
+                <button
+                  type="submit"
+                  disabled={isUpdatingDecoyPin || newDecoyPin.length < 4}
+                  className="px-4 py-2 rounded-xl bg-[#2481cc] hover:bg-[#1e6fb1] text-white font-bold text-xs cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {isUpdatingDecoyPin ? 'جاري الحفظ...' : 'اعتماد الرمز الوهمي'}
+                </button>
+                {adminDecoyPin && (
+                  <button
+                    type="button"
+                    disabled={isUpdatingDecoyPin}
+                    onClick={handleDisableDecoyPin}
+                    className="px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 font-bold text-xs cursor-pointer disabled:opacity-50 shrink-0"
+                  >
+                    تعطيل الرمز
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
         )}
 
         {/* Collapsible Create Account Panel */}
@@ -814,8 +954,8 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
                         isSelected
                           ? 'border-[#2481cc] bg-[#2481cc]/10'
                           : theme === 'light'
-                          ? 'bg-gray-50/80 border-gray-200 hover:bg-gray-100'
-                          : 'bg-[#1e2a38]/70 border-[#2b3a4a] hover:bg-[#233242]'
+                          ? 'bg-slate-50/80 border-slate-200/80 hover:bg-slate-100'
+                          : 'bg-[#162230]/80 border-white/[0.06] hover:bg-[#1a2838]'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2.5">
@@ -837,7 +977,11 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
                               )}
                             </div>
                             {online && (
-                              <span className="absolute bottom-0 left-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#17212b]" />
+                              <span
+                                className={`absolute bottom-0 left-0 w-3 h-3 rounded-full bg-emerald-500 border-2 ${
+                                  theme === 'light' ? 'border-white' : 'border-[#111923]'
+                                }`}
+                              />
                             )}
                           </div>
 
@@ -851,17 +995,17 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
                                     : 'bg-emerald-500/15 text-emerald-400'
                                 }`}
                               >
-                                {u.role === 'admin' ? 'Admin' : 'مستخدم'}
+                                {u.role === 'admin' ? 'مشرف' : 'مستخدم'}
                               </span>
                             </div>
-                            <div className="flex items-center gap-2 text-[11px] text-[#7f91a4] font-mono mt-0.5" dir="ltr">
+                            <div className="flex items-center gap-2 text-[11px] text-[#8ea0b5] font-mono mt-0.5" dir="ltr">
                               <span className="truncate">@{u.username}</span>
                               {u.phone && <span className="truncate">• {u.phone}</span>}
                             </div>
                           </div>
                         </div>
 
-                        <ChevronLeft className="w-4 h-4 text-[#7f91a4] shrink-0" />
+                        <ChevronLeft className="w-4 h-4 text-[#8ea0b5] shrink-0" />
                       </div>
 
                       {/* Password directly displayed on every registered account card */}
@@ -869,13 +1013,13 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
                         onClick={(e) => e.stopPropagation()}
                         className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl border text-[11px] ${
                           theme === 'light'
-                            ? 'bg-white border-gray-200'
-                            : 'bg-[#121a24] border-[#2b3a4a]'
+                            ? 'bg-white border-slate-200/80'
+                            : 'bg-[#0b1118] border-white/[0.06]'
                         }`}
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
                           <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                          <span className="text-[#7f91a4] shrink-0">كلمة المرور:</span>
+                          <span className="text-[#8ea0b5] shrink-0">كلمة المرور:</span>
                           {savedPwd ? (
                             <span
                               className={`font-mono font-bold truncate ${
@@ -886,7 +1030,7 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
                               {pwdVisible ? savedPwd : '••••••••'}
                             </span>
                           ) : (
-                            <span className="text-[#7f91a4] truncate">
+                            <span className="text-[#8ea0b5] truncate">
                               تُحفظ تلقائياً عند تسجيل الدخول
                             </span>
                           )}
@@ -897,7 +1041,11 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
                             <button
                               type="button"
                               onClick={() => toggleRowPassword(u.uid)}
-                              className="p-1 rounded-md hover:bg-white/10 text-[#7f91a4] hover:text-white cursor-pointer"
+                              className={`p-1 rounded-md cursor-pointer transition-colors ${
+                                theme === 'light'
+                                  ? 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'
+                                  : 'hover:bg-white/10 text-[#8ea0b5] hover:text-white'
+                              }`}
                               title={pwdVisible ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
                             >
                               {pwdVisible ? (
@@ -909,7 +1057,11 @@ export const AdminAccountsScreen: React.FC<AdminAccountsScreenProps> = ({
                             <button
                               type="button"
                               onClick={() => handleCopy(`row_pwd_${u.uid}`, savedPwd)}
-                              className="p-1 rounded-md hover:bg-white/10 text-[#7f91a4] hover:text-white cursor-pointer"
+                              className={`p-1 rounded-md cursor-pointer transition-colors ${
+                                theme === 'light'
+                                  ? 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'
+                                  : 'hover:bg-white/10 text-[#8ea0b5] hover:text-white'
+                              }`}
                               title="نسخ كلمة المرور"
                             >
                               {copiedField === `row_pwd_${u.uid}` ? (

@@ -530,41 +530,43 @@ export const CalculatorVault: React.FC<CalculatorVaultProps> = ({ onUnlock }) =>
       : 'text-5xl sm:text-6xl';
 
   const numBtnClass = isDark
-    ? 'bg-[#262629] hover:bg-[#323236] active:bg-[#3f3f44] text-white'
-    : 'bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-900 shadow-xs border border-neutral-200/80';
+    ? 'bg-[#1f1f24] hover:bg-[#2a2a31] active:bg-[#34343c] text-white border border-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_2px_6px_rgba(0,0,0,0.35)]'
+    : 'bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-900 border border-slate-200/90 shadow-xs';
 
   const fnBtnClass = isDark
-    ? 'bg-[#3a3a3f] hover:bg-[#494950] active:bg-[#575760] text-neutral-100'
-    : 'bg-neutral-200/90 hover:bg-neutral-300/90 active:bg-neutral-300 text-neutral-900';
+    ? 'bg-[#2f2f37] hover:bg-[#3c3c46] active:bg-[#494954] text-slate-100 border border-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+    : 'bg-slate-200/85 hover:bg-slate-300/85 active:bg-slate-300 text-slate-800 border border-slate-300/60';
 
   const opBtnClass = (op: Operator) => {
     const isActive = operator === op && waitingForOperand;
     if (isActive) {
       return isDark
-        ? 'bg-white text-[#d97706] shadow-inner'
-        : 'bg-neutral-900 text-amber-400 shadow-inner';
+        ? 'bg-white text-[#d97706] shadow-inner border border-amber-200'
+        : 'bg-slate-900 text-amber-400 shadow-inner border border-slate-800';
     }
-    return 'bg-[#f59e0b] hover:bg-[#e69107] active:bg-[#d97706] text-white';
+    return 'bg-[#f59e0b] hover:bg-[#e69107] active:bg-[#d97706] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_4px_12px_rgba(245,158,11,0.25)]';
   };
 
   const sciBtnClass = isDark
-    ? 'bg-[#1c1c1f] hover:bg-[#2a2a2e] active:bg-[#35353a] text-neutral-200 border border-white/5'
-    : 'bg-neutral-100 hover:bg-neutral-200 active:bg-neutral-300 text-neutral-800 border border-neutral-200';
+    ? 'bg-[#17171c] hover:bg-[#23232a] active:bg-[#2d2d35] text-slate-200 border border-white/[0.06]'
+    : 'bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 border border-slate-200/90';
 
   return (
     <div
       className={`h-dvh w-screen overflow-hidden flex flex-col select-none transition-colors duration-200 ${
-        isDark ? 'bg-[#09090b] text-white' : 'bg-[#f4f4f6] text-neutral-900'
+        isDark ? 'bg-[#09090d] text-white' : 'bg-[#f1f3f6] text-slate-900'
       }`}
     >
       {/* Top Minimal Calculator Bar */}
       <header
-        className={`h-13 px-4 flex items-center justify-between shrink-0 border-b ${
-          isDark ? 'border-white/5 bg-[#09090b]' : 'border-neutral-200 bg-[#f4f4f6]'
+        className={`h-14 px-4 sm:px-6 flex items-center justify-between shrink-0 border-b backdrop-blur-md ${
+          isDark ? 'border-white/[0.06] bg-[#0d0d12]/90' : 'border-slate-200/80 bg-white/85'
         }`}
       >
         <div className="flex items-center gap-2.5">
-          <Calculator className="w-5 h-5 text-[#f59e0b] shrink-0" />
+          <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-[#f59e0b] flex items-center justify-center">
+            <Calculator className="w-4 h-4 shrink-0" />
+          </div>
           <span className="text-sm font-bold tracking-tight whitespace-nowrap">الآلة الحاسبة</span>
         </div>
 
@@ -679,13 +681,17 @@ export const CalculatorVault: React.FC<CalculatorVaultProps> = ({ onUnlock }) =>
             <>
               {/* Display Screen */}
               <div
-                className="flex-1 flex flex-col justify-end items-end px-2 pb-4 sm:pb-6 min-h-[110px]"
+                className={`flex-1 flex flex-col justify-end items-end px-4 sm:px-5 pb-4 sm:pb-5 pt-3 mb-3 rounded-3xl border min-h-[120px] ${
+                  isDark
+                    ? 'bg-[#111116]/90 border-white/[0.06] shadow-[inset_0_2px_10px_rgba(0,0,0,0.45)]'
+                    : 'bg-white border-slate-200/90 shadow-xs'
+                }`}
                 dir="ltr"
               >
                 <div className="w-full text-right overflow-x-auto no-scrollbar">
                   <div
                     className={`text-sm sm:text-base font-mono tabular-nums min-h-[24px] tracking-tight ${
-                      isDark ? 'text-neutral-400' : 'text-neutral-500'
+                      isDark ? 'text-slate-400' : 'text-slate-500'
                     }`}
                   >
                     {expression || '\u00A0'}
@@ -700,8 +706,8 @@ export const CalculatorVault: React.FC<CalculatorVaultProps> = ({ onUnlock }) =>
                     title="حذف آخر رقم"
                     className={`min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                       isDark
-                        ? 'text-neutral-400 hover:text-white hover:bg-white/10'
-                        : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5'
+                        ? 'text-slate-400 hover:text-white hover:bg-white/10'
+                        : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
                     }`}
                   >
                     <Delete className="w-5 h-5" />
@@ -919,7 +925,7 @@ export const CalculatorVault: React.FC<CalculatorVaultProps> = ({ onUnlock }) =>
         {/* Desktop Calculation History Side Panel (Windows/macOS Calculator style) */}
         <aside
           className={`hidden lg:flex w-80 shrink-0 flex-col border-r ${
-            isDark ? 'border-white/5 bg-[#0f0f12]' : 'border-neutral-200 bg-white'
+            isDark ? 'border-white/[0.06] bg-[#0e0e13]' : 'border-slate-200/90 bg-white'
           }`}
         >
           <div

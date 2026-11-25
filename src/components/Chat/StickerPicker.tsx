@@ -164,13 +164,13 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({ onSelectSticker })
       {/* Search & Custom Sticker Upload Header */}
       <div className="flex items-center gap-1.5 mb-2">
         <div
-          className={`flex-1 flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 border transition-colors focus-within:border-[#2481cc] ${
+          className={`flex-1 flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 border transition-all duration-150 focus-within:border-[#2481cc] focus-within:ring-2 ${
             theme === 'light'
-              ? 'bg-gray-100 border-gray-200 text-gray-900'
-              : 'bg-[#242f3d] border-[#2b3a4a] text-white'
+              ? 'bg-slate-100 border-slate-200/80 text-slate-900 focus-within:bg-white focus-within:ring-[#2481cc]/20'
+              : 'bg-[#1a2533] border-white/[0.07] text-white focus-within:bg-[#1e2b3b] focus-within:ring-[#2481cc]/25'
           }`}
         >
-          <Search className="w-3.5 h-3.5 text-[#7f91a4] shrink-0" />
+          <Search className="w-3.5 h-3.5 text-[#8ea0b5] shrink-0" />
           <input
             type="text"
             value={searchQuery}
@@ -225,7 +225,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({ onSelectSticker })
       {!searchQuery.trim() && (
         <div
           className={`flex items-center gap-1 pb-2 mb-2 overflow-x-auto border-b ${
-            theme === 'light' ? 'border-gray-100' : 'border-white/10'
+            theme === 'light' ? 'border-slate-100' : 'border-white/[0.06]'
           }`}
         >
           <button
@@ -344,7 +344,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({ onSelectSticker })
                       {isBroken ? (
                         <div
                           className={`w-16 h-16 rounded-2xl flex items-center justify-center text-3xl ${
-                            theme === 'light' ? 'bg-gray-100' : 'bg-[#242f3d]'
+                            theme === 'light' ? 'bg-slate-100' : 'bg-[#1a2533]'
                           }`}
                         >
                           {sticker.emoji || '🎨'}

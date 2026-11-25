@@ -1,6 +1,15 @@
 export type ChatType = 'direct' | 'group' | 'channel' | 'saved';
 
-export type MessageType = 'text' | 'image' | 'file' | 'voice' | 'sticker' | 'poll' | 'dice';
+export type MessageType =
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'file'
+  | 'voice'
+  | 'sticker'
+  | 'poll'
+  | 'dice'
+  | 'call';
 
 export type UserRole = 'admin' | 'user';
 
@@ -17,6 +26,13 @@ export interface UserProfile {
   lastSeen?: string;
   createdBy?: string;
   createdAt?: string;
+  blockedUserIds?: string[];
+  mutedChatIds?: string[];
+  pinnedChatIds?: string[];
+  privacyHideLastSeen?: boolean;
+  autoLockSeconds?: number; // 0 = immediate on background, 30, 60, 300, -1 = off
+  screenSecurityEnabled?: boolean;
+  discreetNotifications?: boolean;
 }
 
 export interface PollOption {
@@ -44,6 +60,27 @@ export interface InlineButton {
   url?: string;
 }
 
+export interface ForwardedFromInfo {
+  senderId: string;
+  senderName: string;
+  chatTitle?: string;
+}
+
+export interface LinkPreviewData {
+  url: string;
+  domain: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  siteName?: string;
+}
+
+export interface CallLogInfo {
+  isVideo: boolean;
+  status: 'missed' | 'declined' | 'ended';
+  duration: number;
+}
+
 export interface Message {
   id: string;
   chatId: string;
@@ -61,9 +98,14 @@ export interface Message {
   replyToId?: string;
   replyToText?: string;
   replyToSender?: string;
+  forwardedFrom?: ForwardedFromInfo;
+  linkPreview?: LinkPreviewData;
+  callInfo?: CallLogInfo;
   reactions?: Record<string, string[]>; // { "❤️": ["uid1"], "🔥": ["uid2"] }
   isPinned?: boolean;
   isSpoiler?: boolean;
+  isDeleted?: boolean;
+  deletedFor?: string[];
   editedAt?: string;
   inlineButtons?: InlineButton[][];
   diceValue?: number;
@@ -83,6 +125,8 @@ export interface Chat {
   createdAt: string;
   updatedAt: string;
   memberIds: string[];
+  adminIds?: string[];
+  bannedIds?: string[];
   membersCount?: number;
   pinnedMessageId?: string;
   lastMessage?: {
@@ -104,12 +148,14 @@ export interface TypingIndicator {
   uid: string;
   displayName: string;
   isTyping: boolean;
+  activity?: 'typing' | 'recording';
   updatedAt: string;
 }
 
 export interface GroupInvite {
   inviteCode: string;
   chatId: string;
+  chatType?: 'group' | 'channel';
   title: string;
   description?: string;
   photoURL?: string;
@@ -133,14 +179,39 @@ export type ChatWallpaper = 'classic' | 'night' | 'emerald' | 'purple' | 'desert
 
 export type FolderFilter = 'all' | 'direct' | 'group' | 'channel' | 'saved';
 
+export interface CallSessionDescription {
+  type: 'offer' | 'answer';
+  sdp: string;
+}
+
+export interface CallDocument {
+  id: string;
+  chatId: string;
+  callerId: string;
+  callerName: string;
+  callerPhoto?: string;
+  calleeIds: string[];
+  isVideo: boolean;
+  status: 'ringing' | 'connected' | 'ended' | 'declined' | 'missed';
+  offer?: CallSessionDescription;
+  answer?: CallSessionDescription;
+  createdAt: string;
+  updatedAt: string;
+  endedAt?: string;
+}
+
 export interface CallState {
   isActive: boolean;
+  callId?: string | null;
+  direction?: 'outgoing' | 'incoming';
   isVideo: boolean;
-  status: 'calling' | 'connected' | 'ended';
+  status: 'calling' | 'ringing' | 'connected' | 'ended' | 'declined';
   duration: number;
   isMuted: boolean;
   isCameraOff: boolean;
   chat: Chat | null;
+  localStream?: MediaStream | null;
+  remoteStream?: MediaStream | null;
 }
 
 export interface StickerItem {
@@ -172,4 +243,12 @@ export interface UserStickerDoc {
   useCount: number;
   lastUsedAt: string;
   createdAt: string;
+}
+
+export interface PendingSharePayload {
+  type: 'text' | 'image';
+  text?: string;
+  dataUrl?: string;
+  mimeType?: string;
+  fileName?: string;
 }

@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "JanaX user profile and account metadata",
+      "description": "JanaX user profile, account metadata, and privacy preferences",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
@@ -16,7 +16,14 @@
         "isOnline": { "type": "boolean" },
         "lastSeen": { "type": "string", "maxLength": 50 },
         "createdBy": { "type": "string", "maxLength": 128 },
-        "createdAt": { "type": "string", "maxLength": 50 }
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "blockedUserIds": { "type": "array" },
+        "mutedChatIds": { "type": "array" },
+        "pinnedChatIds": { "type": "array" },
+        "privacyHideLastSeen": { "type": "boolean" },
+        "autoLockSeconds": { "type": "number" },
+        "screenSecurityEnabled": { "type": "boolean" },
+        "discreetNotifications": { "type": "boolean" }
       },
       "required": ["uid", "username", "displayName", "role"]
     },
@@ -36,13 +43,15 @@
         "createdAt": { "type": "string", "maxLength": 50 },
         "updatedAt": { "type": "string", "maxLength": 50 },
         "memberIds": { "type": "array" },
+        "adminIds": { "type": "array" },
+        "bannedIds": { "type": "array" },
         "pinnedMessageId": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "type", "title", "createdBy"]
     },
     "Message": {
       "title": "Message",
-      "description": "Chat message with real readBy receipts and media",
+      "description": "Chat message with real readBy receipts, media, link previews, and deletion flags",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
@@ -51,15 +60,20 @@
         "senderName": { "type": "string", "maxLength": 100 },
         "senderPhoto": { "type": "string", "maxLength": 500000 },
         "text": { "type": "string", "maxLength": 4000 },
-        "type": { "type": "string", "enum": ["text", "image", "file", "voice", "sticker", "poll", "dice"] },
+        "type": { "type": "string", "enum": ["text", "image", "video", "file", "voice", "sticker", "poll", "dice", "call"] },
         "mediaUrl": { "type": "string", "maxLength": 800000 },
         "mediaName": { "type": "string", "maxLength": 200 },
         "mediaSize": { "type": "string", "maxLength": 50 },
         "voiceDuration": { "type": "number" },
         "replyToId": { "type": "string", "maxLength": 128 },
         "replyToText": { "type": "string", "maxLength": 300 },
+        "forwardedFrom": { "type": "object", "description": "Original sender attribution when message is forwarded" },
+        "linkPreview": { "type": "object", "description": "Parsed rich URL metadata preview" },
+        "callInfo": { "type": "object", "description": "Call log summary metadata" },
         "isPinned": { "type": "boolean" },
         "isSpoiler": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "deletedFor": { "type": "array" },
         "editedAt": { "type": "string", "maxLength": 50 },
         "readBy": { "type": "array" },
         "createdAt": { "type": "string", "maxLength": 50 }
@@ -68,11 +82,12 @@
     },
     "GroupInvite": {
       "title": "GroupInvite",
-      "description": "Group invitation mapping inviteCode to chatId",
+      "description": "Group and channel invitation mapping inviteCode to chatId",
       "type": "object",
       "properties": {
         "inviteCode": { "type": "string", "maxLength": 64 },
         "chatId": { "type": "string", "maxLength": 128 },
+        "chatType": { "type": "string", "enum": ["group", "channel"] },
         "title": { "type": "string", "maxLength": 120 },
         "description": { "type": "string", "maxLength": 500 },
         "photoURL": { "type": "string", "maxLength": 500000 },
@@ -83,12 +98,13 @@
     },
     "TypingIndicator": {
       "title": "TypingIndicator",
-      "description": "Real-time per-user typing state inside a chat",
+      "description": "Real-time per-user typing or voice recording state inside a chat",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
         "displayName": { "type": "string", "maxLength": 100 },
         "isTyping": { "type": "boolean" },
+        "activity": { "type": "string", "enum": ["typing", "recording"] },
         "updatedAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["uid", "displayName", "isTyping", "updatedAt"]
@@ -122,7 +138,7 @@
     },
     "CalculatorLockPublic": {
       "title": "CalculatorLockPublic",
-      "description": "Publicly verifiable salted SHA-256 hash and version of the global Calculator access PIN (never stores plaintext PIN)",
+      "description": "Publicly verifiable salted SHA-256 hash and version of the Calculator access or decoy PIN",
       "type": "object",
       "properties": {
         "pinHash": { "type": "string", "maxLength": 64 },
@@ -135,7 +151,7 @@
     },
     "CalculatorLockAdmin": {
       "title": "CalculatorLockAdmin",
-      "description": "Admin-only record holding the current active Calculator PIN for Admin viewing and auditing",
+      "description": "Admin-only record holding the current active Calculator or Decoy PIN for Admin management",
       "type": "object",
       "properties": {
         "pin": { "type": "string", "maxLength": 12, "pattern": "^[0-9]{4,12}$" },
@@ -162,12 +178,44 @@
         "createdAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "uid", "emoji", "name", "label", "url", "isCustom", "useCount", "lastUsedAt", "createdAt"]
+    },
+    "CallSession": {
+      "title": "CallSession",
+      "description": "Real-time WebRTC call signaling document for audio and video calls",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "chatId": { "type": "string", "maxLength": 128 },
+        "callerId": { "type": "string", "maxLength": 128 },
+        "callerName": { "type": "string", "maxLength": 100 },
+        "callerPhoto": { "type": "string", "maxLength": 500000 },
+        "calleeIds": { "type": "array" },
+        "isVideo": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ringing", "connected", "ended", "declined", "missed"] },
+        "offer": { "type": "object" },
+        "answer": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "endedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "chatId", "callerId", "callerName", "calleeIds", "isVideo", "status", "createdAt", "updatedAt"]
+    },
+    "CallCandidate": {
+      "title": "CallCandidate",
+      "description": "WebRTC ICE candidate exchanged during a call",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string", "maxLength": 128 },
+        "candidate": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["senderId", "candidate", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
-      "description": "JanaX user profiles"
+      "description": "JanaX user profiles and privacy preferences"
     },
     "/users/{userId}/stickers/{stickerId}": {
       "schema": "UserSticker",
@@ -183,11 +231,11 @@
     },
     "/appConfig/{configId}": {
       "schema": "CalculatorLockPublic",
-      "description": "Global application lock configuration containing only salted PIN hash and version"
+      "description": "Global application lock and decoy lock salted PIN hashes"
     },
     "/adminConfig/{configId}": {
       "schema": "CalculatorLockAdmin",
-      "description": "Admin-only calculator lock configuration holding the active numeric PIN"
+      "description": "Admin-only calculator and decoy lock configurations"
     },
     "/chats/{chatId}": {
       "schema": "Chat",
@@ -199,15 +247,23 @@
     },
     "/chats/{chatId}/typing/{userId}": {
       "schema": "TypingIndicator",
-      "description": "Real-time typing indicator status per chat participant"
+      "description": "Real-time typing and voice recording indicator status per chat participant"
     },
     "/groupInvites/{inviteCode}": {
       "schema": "GroupInvite",
-      "description": "Invite links for joining groups"
+      "description": "Invite links for joining groups and channels"
     },
     "/stories/{storyId}": {
       "schema": "Story",
       "description": "Cloud stories shared by users"
+    },
+    "/calls/{callId}": {
+      "schema": "CallSession",
+      "description": "Active and historical WebRTC call signaling sessions"
+    },
+    "/calls/{callId}/candidates/{candidateId}": {
+      "schema": "CallCandidate",
+      "description": "WebRTC ICE candidates for peer connection negotiation"
     }
   }
 }

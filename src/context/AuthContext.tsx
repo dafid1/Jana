@@ -45,6 +45,7 @@ import {
   CalculatorLockAdminConfig,
   buildCalculatorPinHash,
   setCachedCalculatorLock,
+  setCachedDecoyLock,
   verifyCalculatorPin,
 } from '../utils/calculatorLock';
 
@@ -53,7 +54,20 @@ const SESSION_UID_KEY = 'janax_session_uid';
 const SESSION_STARTED_KEY = 'janax_session_started_at';
 const BG_TIMESTAMP_KEY = 'janax_bg_timestamp';
 const LEFT_APP_KEY = 'janax_left_app';
-const BACKGROUND_TIMEOUT_MS = 30 * 1000; // 30 seconds
+const AUTOLOCK_SECONDS_CACHE_KEY = 'janax_autolock_seconds';
+const DEFAULT_BACKGROUND_TIMEOUT_MS = 30 * 1000; // 30 seconds
+
+function getConfiguredBgTimeoutMs(userProfileTimeout?: number): number {
+  const raw =
+    typeof userProfileTimeout === 'number'
+      ? userProfileTimeout
+      : Number(localStorage.getItem(AUTOLOCK_SECONDS_CACHE_KEY));
+  if (Number.isFinite(raw)) {
+    if (raw === -1) return -1;
+    if (raw >= 0 && raw <= 3600) return raw * 1000;
+  }
+  return DEFAULT_BACKGROUND_TIMEOUT_MS;
+}
 
 interface CreateAccountPayload {
   username: string;
@@ -71,6 +85,8 @@ interface AuthContextType {
   adminCredentialsMap: Record<string, string>;
   adminCalculatorPin: string;
   calculatorPinVersion: number;
+  adminDecoyPin: string;
+  decoyPinVersion: number;
   isAdmin: boolean;
   loading: boolean;
   isAutoLoggingIn: boolean;
@@ -89,8 +105,10 @@ interface AuthContextType {
     password: string;
     displayName?: string;
   }) => Promise<void>;
-  unlockWithCalculatorCode: (code: string) => Promise<boolean>;
+  unlockWithCalculatorCode: (code: string) => Promise<'real' | 'decoy' | false>;
   updateCalculatorPinByAdmin: (newPin: string) => Promise<void>;
+  updateDecoyPinByAdmin: (newPin: string) => Promise<void>;
+  disableDecoyPinByAdmin: () => Promise<void>;
   createAccountByAdmin: (payload: CreateAccountPayload) => Promise<UserProfile>;
   getUserCredentialByAdmin: (uid: string) => Promise<string | null>;
   updateUserProfileByAdmin: (
@@ -105,6 +123,15 @@ interface AuthContextType {
   deleteUserProfileByAdmin: (uid: string) => Promise<void>;
   logout: (reason?: string, forgetDevice?: boolean) => Promise<void>;
   updateUserProfile: (data: Partial<UserProfile>) => Promise<void>;
+  toggleBlockUser: (targetUid: string) => Promise<boolean>;
+  toggleMuteChat: (chatId: string) => Promise<boolean>;
+  togglePinChat: (chatId: string) => Promise<boolean>;
+  updatePrivacySettings: (settings: {
+    privacyHideLastSeen?: boolean;
+    autoLockSeconds?: number;
+    screenSecurityEnabled?: boolean;
+    discreetNotifications?: boolean;
+  }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -116,6 +143,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [adminCredentialsMap, setAdminCredentialsMap] = useState<Record<string, string>>({});
   const [adminCalculatorPin, setAdminCalculatorPin] = useState<string>(DEFAULT_CALCULATOR_PIN);
   const [calculatorPinVersion, setCalculatorPinVersion] = useState<number>(0);
+  const [adminDecoyPin, setAdminDecoyPin] = useState<string>('');
+  const [decoyPinVersion, setDecoyPinVersion] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
   const [lockCounter, setLockCounter] = useState(0);
@@ -261,10 +290,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             0
         );
 
-        // If background exceeded 30s before resume -> auto logout & return to Calculator
-        if (bgTs > 0 && Date.now() - bgTs >= BACKGROUND_TIMEOUT_MS) {
+        // If background exceeded configured timeout before resume -> auto logout & return to Calculator
+        const configuredTimeoutMs = getConfiguredBgTimeoutMs();
+        if (configuredTimeoutMs >= 0 && bgTs > 0 && Date.now() - bgTs >= configuredTimeoutMs) {
           clearSessionTokens();
-          setLogoutReason('تم تسجيل الخروج تلقائياً لبقاء التطبيق في الخلفية أكثر من 30 ثانية');
+          setLogoutReason('تم قفل الخزنة تلقائياً لحماية خصوصيتك');
           setCurrentUser(null);
           setUserProfile(null);
           setAllUsers([]);
@@ -299,10 +329,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (userSnap.exists()) {
             const data = userSnap.data() as UserProfile;
             setUserProfile(data);
-            updateDoc(userRef, {
-              isOnline: true,
-              lastSeen: new Date().toISOString(),
-            }).catch(() => {});
+            if (typeof data.autoLockSeconds === 'number') {
+              localStorage.setItem(AUTOLOCK_SECONDS_CACHE_KEY, String(data.autoLockSeconds));
+            }
+            if (!data.privacyHideLastSeen) {
+              updateDoc(userRef, {
+                isOnline: true,
+                lastSeen: new Date().toISOString(),
+              }).catch(() => {});
+            } else {
+              updateDoc(userRef, { isOnline: false }).catch(() => {});
+            }
           } else {
             const pending =
               pendingSignupRef.current &&
@@ -456,14 +493,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, [currentUser, logout]);
 
-  // Admin-only listener for the current plaintext Calculator PIN
+  // Admin-only listener for the current plaintext Calculator PIN & Decoy PIN
   useEffect(() => {
     if (!currentUser || !isAdmin) {
       setAdminCalculatorPin(DEFAULT_CALCULATOR_PIN);
+      setAdminDecoyPin('');
+      setDecoyPinVersion(0);
       return;
     }
 
-    const unsubscribe = onSnapshot(
+    const unsubscribeMain = onSnapshot(
       doc(db, 'adminConfig', 'calculatorLock'),
       (docSnap) => {
         if (!docSnap.exists()) {
@@ -481,12 +520,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
-    return () => unsubscribe();
+    const unsubscribeDecoy = onSnapshot(
+      doc(db, 'adminConfig', 'decoyLock'),
+      (docSnap) => {
+        if (!docSnap.exists()) {
+          setAdminDecoyPin('');
+          setDecoyPinVersion(0);
+          return;
+        }
+        const data = docSnap.data() as CalculatorLockAdminConfig;
+        if (typeof data.pin === 'string' && /^\d{4,12}$/.test(data.pin)) {
+          setAdminDecoyPin(data.pin);
+          setDecoyPinVersion(data.version || 0);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'adminConfig/decoyLock');
+      }
+    );
+
+    return () => {
+      unsubscribeMain();
+      unsubscribeDecoy();
+    };
   }, [currentUser, isAdmin]);
 
-  // Monitor Background (>30s auto-logout) & App Exit / Leaving Lifecycle
+  // Monitor Background (configurable auto-lock timeout) & App Exit / Leaving Lifecycle
+  const hideLastSeen = Boolean(userProfile?.privacyHideLastSeen);
+  const autoLockSeconds = userProfile?.autoLockSeconds;
+
   useEffect(() => {
     if (!currentUser) return;
+
+    const timeoutMs = getConfiguredBgTimeoutMs(autoLockSeconds);
 
     const enterBackground = () => {
       if (!bgStartedAtRef.current) {
@@ -496,15 +562,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem(BG_TIMESTAMP_KEY, String(now));
       }
 
-      updateDoc(doc(db, 'users', currentUser.uid), {
-        isOnline: false,
-        lastSeen: new Date().toISOString(),
-      }).catch(() => {});
+      if (!hideLastSeen) {
+        updateDoc(doc(db, 'users', currentUser.uid), {
+          isOnline: false,
+          lastSeen: new Date().toISOString(),
+        }).catch(() => {});
+      }
 
-      if (!bgLogoutTimerRef.current) {
+      if (timeoutMs === 0) {
+        logout('تم قفل الخزنة تلقائياً عند الخروج إلى الخلفية', false);
+        return;
+      }
+
+      if (timeoutMs > 0 && !bgLogoutTimerRef.current) {
         bgLogoutTimerRef.current = setTimeout(() => {
-          logout('تم تسجيل الخروج تلقائياً لبقاء التطبيق في الخلفية أكثر من 30 ثانية', false);
-        }, BACKGROUND_TIMEOUT_MS);
+          logout('تم قفل الخزنة تلقائياً لحماية خصوصيتك بعد البقاء في الخلفية', false);
+        }, timeoutMs);
       }
     };
 
@@ -526,15 +599,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionStorage.removeItem(BG_TIMESTAMP_KEY);
       localStorage.removeItem(BG_TIMESTAMP_KEY);
 
-      if (bgTs > 0 && Date.now() - bgTs >= BACKGROUND_TIMEOUT_MS) {
-        logout('تم تسجيل الخروج تلقائياً لبقاء التطبيق في الخلفية أكثر من 30 ثانية', false);
+      if (timeoutMs >= 0 && bgTs > 0 && Date.now() - bgTs >= timeoutMs) {
+        logout('تم قفل الخزنة تلقائياً لحماية خصوصيتك', false);
         return;
       }
 
-      updateDoc(doc(db, 'users', currentUser.uid), {
-        isOnline: true,
-        lastSeen: new Date().toISOString(),
-      }).catch(() => {});
+      if (!hideLastSeen) {
+        updateDoc(doc(db, 'users', currentUser.uid), {
+          isOnline: true,
+          lastSeen: new Date().toISOString(),
+        }).catch(() => {});
+      }
     };
 
     const handleVisibilityChange = () => {
@@ -558,13 +633,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       bgStartedAtRef.current = null;
 
-      updateDoc(doc(db, 'users', currentUser.uid), {
-        isOnline: false,
-        lastSeen: new Date().toISOString(),
-      }).catch(() => {});
+      if (!hideLastSeen) {
+        updateDoc(doc(db, 'users', currentUser.uid), {
+          isOnline: false,
+          lastSeen: new Date().toISOString(),
+        }).catch(() => {});
+      }
 
-      // Delete session token, end active Firebase session, and transition back to Calculator
-      // Keep encrypted deviceVault so returning user signs back in directly via Calculator (2580)
       clearSessionTokens();
       sessionStorage.setItem(LEFT_APP_KEY, '1');
       signOut(auth).catch(() => {});
@@ -572,7 +647,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const heartbeatTimer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !hideLastSeen) {
         updateDoc(doc(db, 'users', currentUser.uid), {
           isOnline: true,
           lastSeen: new Date().toISOString(),
@@ -600,10 +675,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('pagehide', handleLeaveApp);
       window.removeEventListener('unload', handleLeaveApp);
     };
-  }, [currentUser, logout, clearSessionTokens]);
+  }, [currentUser, logout, clearSessionTokens, hideLastSeen, autoLockSeconds]);
 
   const unlockWithCalculatorCode = useCallback(
-    async (code: string): Promise<boolean> => {
+    async (code: string): Promise<'real' | 'decoy' | false> => {
       if (hasDeviceVault()) {
         setIsAutoLoggingIn(true);
       }
@@ -617,23 +692,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return false;
         }
 
+        // Decoy / Panic PIN unlocks harmless empty workspace without logging into the real vault
+        if (verification.mode === 'decoy') {
+          isLoggingInRef.current = false;
+          setIsAutoLoggingIn(false);
+          return 'decoy';
+        }
+
         unlockedPinVersionRef.current = verification.version;
 
         if (auth.currentUser && sessionStorage.getItem(SESSION_UID_KEY) === auth.currentUser.uid) {
           setIsAutoLoggingIn(false);
-          return true;
+          return 'real';
         }
 
         if (!hasDeviceVault()) {
           setIsAutoLoggingIn(false);
-          return true;
+          return 'real';
         }
 
         const creds = await decryptDeviceVault();
         if (!creds) {
           clearDeviceVault();
           setLogoutReason('يرجى تسجيل الدخول للمتابعة');
-          return true;
+          return 'real';
         }
 
         await setPersistence(auth, browserSessionPersistence);
@@ -644,7 +726,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           password: creds.password,
           uid: cred.user.uid,
         }).catch(() => {});
-        return true;
+        return 'real';
       } catch (error: unknown) {
         const fbErr = error as { code?: string };
         const errCode = fbErr?.code || '';
@@ -659,7 +741,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           setLogoutReason('تعذر الاتصال لتسجيل الدخول التلقائي، يرجى تسجيل الدخول');
         }
-        return true;
+        return 'real';
       } finally {
         isLoggingInRef.current = false;
         setIsAutoLoggingIn(false);
@@ -683,11 +765,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('يرجى إدخال رمز جديد مختلف عن الرمز الحالي لتعطيل الرمز السابق');
       }
 
+      if (adminDecoyPin && cleanPin === adminDecoyPin) {
+        throw new Error('لا يمكن استخدام نفس الرمز الوهمي كرمز دخول رئيسي');
+      }
+
       const { pinHash, salt, pinLength } = await buildCalculatorPinHash(cleanPin);
       const nextVersion = Math.max(calculatorPinVersion, unlockedPinVersionRef.current) + 1;
       const now = new Date().toISOString();
 
-      // Advance Admin's own unlocked version before commit so Admin stays inside Admin panel
       unlockedPinVersionRef.current = nextVersion;
 
       const publicPayload: CalculatorLockPublicConfig = {
@@ -718,8 +803,75 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleFirestoreError(error, OperationType.WRITE, 'appConfig/calculatorLock');
       }
     },
-    [currentUser, isAdmin, adminCalculatorPin, calculatorPinVersion]
+    [currentUser, isAdmin, adminCalculatorPin, adminDecoyPin, calculatorPinVersion]
   );
+
+  const updateDecoyPinByAdmin = useCallback(
+    async (newPinRaw: string) => {
+      if (!currentUser || !isAdmin) {
+        throw new Error('هذه الصلاحية متاحة للأدمن فقط');
+      }
+
+      const cleanPin = normalizeArabicDigits(newPinRaw).trim();
+      if (!/^\d{4,12}$/.test(cleanPin)) {
+        throw new Error('يجب أن يتكون الرمز الوهمي من 4 إلى 12 رقماً إنجليزياً فقط');
+      }
+
+      if (cleanPin === adminCalculatorPin) {
+        throw new Error('يجب أن يكون الرمز الوهمي مختلفاً عن رمز الدخول الرئيسي');
+      }
+
+      const { pinHash, salt, pinLength } = await buildCalculatorPinHash(cleanPin);
+      const nextVersion = Math.max(1, decoyPinVersion + 1);
+      const now = new Date().toISOString();
+
+      const publicPayload: CalculatorLockPublicConfig = {
+        pinHash,
+        salt,
+        pinLength,
+        version: nextVersion,
+        updatedAt: now,
+      };
+
+      const adminPayload: CalculatorLockAdminConfig = {
+        pin: cleanPin,
+        version: nextVersion,
+        updatedAt: now,
+        updatedBy: currentUser.uid,
+      };
+
+      try {
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'appConfig', 'decoyLock'), publicPayload);
+        batch.set(doc(db, 'adminConfig', 'decoyLock'), adminPayload);
+        await batch.commit();
+
+        setCachedDecoyLock(publicPayload);
+        setAdminDecoyPin(cleanPin);
+        setDecoyPinVersion(nextVersion);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'appConfig/decoyLock');
+      }
+    },
+    [currentUser, isAdmin, adminCalculatorPin, decoyPinVersion]
+  );
+
+  const disableDecoyPinByAdmin = useCallback(async () => {
+    if (!currentUser || !isAdmin) {
+      throw new Error('هذه الصلاحية متاحة للأدمن فقط');
+    }
+    try {
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'appConfig', 'decoyLock'));
+      batch.delete(doc(db, 'adminConfig', 'decoyLock'));
+      await batch.commit();
+      setCachedDecoyLock(null);
+      setAdminDecoyPin('');
+      setDecoyPinVersion(0);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'appConfig/decoyLock');
+    }
+  }, [currentUser, isAdmin]);
 
   const loginWithCredentials = async (identifier: string, password: string) => {
     const trimmed = identifier.trim();
@@ -1120,7 +1272,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateUserProfile = async (data: Partial<UserProfile>) => {
+  const updateUserProfile = useCallback(async (data: Partial<UserProfile>) => {
     if (!currentUser) return;
     try {
       const safeData = { ...data };
@@ -1134,7 +1286,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
     }
-  };
+  }, [currentUser]);
+
+  const toggleBlockUser = useCallback(
+    async (targetUid: string): Promise<boolean> => {
+      if (!currentUser || !targetUid || targetUid === currentUser.uid) return false;
+      const currentBlocked = Array.isArray(userProfile?.blockedUserIds)
+        ? userProfile.blockedUserIds
+        : [];
+      const isCurrentlyBlocked = currentBlocked.includes(targetUid);
+      const nextBlocked = isCurrentlyBlocked
+        ? currentBlocked.filter((id) => id !== targetUid)
+        : [...currentBlocked, targetUid].slice(0, 200);
+      await updateUserProfile({ blockedUserIds: nextBlocked });
+      return !isCurrentlyBlocked;
+    },
+    [currentUser, userProfile?.blockedUserIds, updateUserProfile]
+  );
+
+  const toggleMuteChat = useCallback(
+    async (chatId: string): Promise<boolean> => {
+      if (!currentUser || !chatId) return false;
+      const currentMuted = Array.isArray(userProfile?.mutedChatIds)
+        ? userProfile.mutedChatIds
+        : [];
+      const isMuted = currentMuted.includes(chatId);
+      const nextMuted = isMuted
+        ? currentMuted.filter((id) => id !== chatId)
+        : [...currentMuted, chatId].slice(0, 500);
+      await updateUserProfile({ mutedChatIds: nextMuted });
+      return !isMuted;
+    },
+    [currentUser, userProfile?.mutedChatIds, updateUserProfile]
+  );
+
+  const togglePinChat = useCallback(
+    async (chatId: string): Promise<boolean> => {
+      if (!currentUser || !chatId) return false;
+      const currentPinned = Array.isArray(userProfile?.pinnedChatIds)
+        ? userProfile.pinnedChatIds
+        : [];
+      const isPinned = currentPinned.includes(chatId);
+      const nextPinned = isPinned
+        ? currentPinned.filter((id) => id !== chatId)
+        : [chatId, ...currentPinned].slice(0, 50);
+      await updateUserProfile({ pinnedChatIds: nextPinned });
+      return !isPinned;
+    },
+    [currentUser, userProfile?.pinnedChatIds, updateUserProfile]
+  );
+
+  const updatePrivacySettings = useCallback(
+    async (settings: {
+      privacyHideLastSeen?: boolean;
+      autoLockSeconds?: number;
+      screenSecurityEnabled?: boolean;
+      discreetNotifications?: boolean;
+    }) => {
+      if (!currentUser) return;
+      const payload: Partial<UserProfile> = { ...settings };
+      if (typeof settings.autoLockSeconds === 'number') {
+        localStorage.setItem(AUTOLOCK_SECONDS_CACHE_KEY, String(settings.autoLockSeconds));
+      }
+      if (settings.privacyHideLastSeen === true) {
+        payload.isOnline = false;
+      } else if (settings.privacyHideLastSeen === false) {
+        payload.isOnline = true;
+        payload.lastSeen = new Date().toISOString();
+      }
+      await updateUserProfile(payload);
+    },
+    [currentUser, updateUserProfile]
+  );
 
   const contextValue = useMemo<AuthContextType>(
     () => ({
@@ -1145,6 +1368,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       adminCredentialsMap,
       adminCalculatorPin,
       calculatorPinVersion,
+      adminDecoyPin,
+      decoyPinVersion,
       isAdmin,
       loading,
       isAutoLoggingIn,
@@ -1161,6 +1386,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       registerWithPhone,
       unlockWithCalculatorCode,
       updateCalculatorPinByAdmin,
+      updateDecoyPinByAdmin,
+      disableDecoyPinByAdmin,
       createAccountByAdmin,
       getUserCredentialByAdmin,
       updateUserProfileByAdmin,
@@ -1168,6 +1395,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       deleteUserProfileByAdmin,
       logout,
       updateUserProfile,
+      toggleBlockUser,
+      toggleMuteChat,
+      togglePinChat,
+      updatePrivacySettings,
     }),
     [
       currentUser,
@@ -1177,6 +1408,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       adminCredentialsMap,
       adminCalculatorPin,
       calculatorPinVersion,
+      adminDecoyPin,
+      decoyPinVersion,
       isAdmin,
       loading,
       isAutoLoggingIn,
@@ -1191,10 +1424,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setFontSize,
       unlockWithCalculatorCode,
       updateCalculatorPinByAdmin,
+      updateDecoyPinByAdmin,
+      disableDecoyPinByAdmin,
       getUserCredentialByAdmin,
       updateUserProfileByAdmin,
       updateUserPasswordByAdmin,
       logout,
+      updateUserProfile,
+      toggleBlockUser,
+      toggleMuteChat,
+      togglePinChat,
+      updatePrivacySettings,
     ]
   );
 

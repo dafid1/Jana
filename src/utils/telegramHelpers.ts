@@ -62,10 +62,10 @@ export function formatTelegramTime(dateStr?: string): string {
 export const ONLINE_THRESHOLD_MS = 60_000;
 
 export function isUserOnlineByLastSeen(
-  user?: { lastSeen?: string; isOnline?: boolean },
+  user?: { lastSeen?: string; isOnline?: boolean; privacyHideLastSeen?: boolean },
   nowMs: number = Date.now()
 ): boolean {
-  if (!user || !user.lastSeen) return false;
+  if (!user || user.privacyHideLastSeen || !user.lastSeen) return false;
   if (user.isOnline === false) return false;
   const lastSeenMs = new Date(user.lastSeen).getTime();
   if (Number.isNaN(lastSeenMs)) return false;
@@ -113,14 +113,18 @@ export function getMessageReplyPreview(msg?: {
   type?: string;
   text?: string;
   mediaName?: string;
+  isDeleted?: boolean;
   pollData?: { question?: string };
 }): string {
   if (!msg) return '';
+  if (msg.isDeleted) return 'تم حذف هذه الرسالة';
   const trimmed = (msg.text || '').trim();
   if (trimmed) return trimmed;
   switch (msg.type) {
     case 'image':
       return '📷 صورة';
+    case 'video':
+      return '🎬 فيديو';
     case 'voice':
       return '🎤 رسالة صوتية';
     case 'file':
@@ -131,6 +135,8 @@ export function getMessageReplyPreview(msg?: {
       return `📊 ${msg.pollData?.question || 'استطلاع رأي'}`;
     case 'dice':
       return '🎲 رمية نرد';
+    case 'call':
+      return '📞 مكالمة';
     default:
       return 'رسالة';
   }
@@ -204,20 +210,223 @@ export function generateInviteCode(): string {
   return code;
 }
 
+export interface ParsedInviteTarget {
+  inviteCode?: string;
+  chatId?: string;
+}
+
+export interface TextLinkSegment {
+  text: string;
+  url?: string;
+  inviteTarget?: ParsedInviteTarget | null;
+}
+
+const VALID_ID_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
+const INVITE_CODE_REGEX = /^JNX-[A-Z0-9]{4,32}$/i;
+const URL_DETECTION_REGEX = /((?:https?:\/\/|www\.)[^\s<>"'`]+|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/[^\s<>"'`]*)?(?:\?[^\s<>"'`]*)?(?:#[^\s<>"'`]*)?)/gi;
+
+export function sanitizeExternalUrl(rawUrl: string): string | null {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return null;
+
+  // Block dangerous schemes explicitly
+  if (/^(javascript|data|vbscript|file):/i.test(trimmed)) {
+    return null;
+  }
+
+  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    if (!parsed.hostname || !parsed.hostname.includes('.')) {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function parseInviteTarget(input: string): ParsedInviteTarget | null {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return null;
+
+  if (INVITE_CODE_REGEX.test(trimmed)) {
+    return { inviteCode: trimmed.toUpperCase() };
+  }
+
+  const candidateUrl =
+    trimmed.startsWith('http://') || trimmed.startsWith('https://')
+      ? trimmed
+      : trimmed.startsWith('?')
+      ? `https://janax.app/${trimmed}`
+      : trimmed.includes('join=') || trimmed.includes('channel=') || trimmed.includes('group=') || trimmed.includes('/join/')
+      ? `https://janax.app/${trimmed.replace(/^\/+/, '')}`
+      : '';
+
+  if (candidateUrl) {
+    try {
+      const parsed = new URL(candidateUrl);
+      const joinParam = parsed.searchParams.get('join')?.trim();
+      if (joinParam) {
+        if (INVITE_CODE_REGEX.test(joinParam)) {
+          return { inviteCode: joinParam.toUpperCase() };
+        }
+        if (VALID_ID_REGEX.test(joinParam)) {
+          return { inviteCode: joinParam.toUpperCase(), chatId: joinParam };
+        }
+      }
+
+      const directChatId =
+        parsed.searchParams.get('channel')?.trim() ||
+        parsed.searchParams.get('group')?.trim() ||
+        parsed.searchParams.get('chat')?.trim();
+      if (directChatId && VALID_ID_REGEX.test(directChatId)) {
+        return { chatId: directChatId };
+      }
+
+      const pathMatch = parsed.pathname.match(/\/join\/([A-Za-z0-9_-]+)/i);
+      if (pathMatch?.[1]) {
+        const code = pathMatch[1];
+        if (INVITE_CODE_REGEX.test(code)) {
+          return { inviteCode: code.toUpperCase() };
+        }
+        if (VALID_ID_REGEX.test(code)) {
+          return { chatId: code };
+        }
+      }
+    } catch {
+      // Fallback regex check below
+    }
+  }
+
+  const regexJoin = trimmed.match(/[?&]join=([A-Za-z0-9_-]+)/i);
+  if (regexJoin?.[1]) {
+    return { inviteCode: regexJoin[1].toUpperCase() };
+  }
+
+  const regexChannelOrGroup = trimmed.match(/[?&](?:channel|group|chat)=([A-Za-z0-9_-]+)/i);
+  if (regexChannelOrGroup?.[1] && VALID_ID_REGEX.test(regexChannelOrGroup[1])) {
+    return { chatId: regexChannelOrGroup[1] };
+  }
+
+  return null;
+}
+
 export function extractInviteCode(input: string): string {
+  const target = parseInviteTarget(input);
+  if (target?.inviteCode) return target.inviteCode;
   const trimmed = input.trim();
   if (!trimmed) return '';
-  try {
-    if (trimmed.includes('join=')) {
-      const url = new URL(trimmed.startsWith('http') ? trimmed : `https://janax.app/?${trimmed.split('?')[1] || trimmed}`);
-      return (url.searchParams.get('join') || '').trim().toUpperCase();
-    }
-  } catch {
-    // Fallback parsing
-    const match = trimmed.match(/join=([A-Za-z0-9_-]+)/);
-    if (match) return match[1].toUpperCase();
-  }
   return trimmed.toUpperCase();
+}
+
+export function buildChatInviteLink(chat: {
+  id: string;
+  type?: string;
+  inviteCode?: string;
+}): string {
+  const baseUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}`
+      : 'https://janax.app/';
+  if (chat.inviteCode) {
+    return `${baseUrl}?join=${encodeURIComponent(chat.inviteCode)}`;
+  }
+  const paramKey = chat.type === 'channel' ? 'channel' : 'group';
+  return `${baseUrl}?${paramKey}=${encodeURIComponent(chat.id)}`;
+}
+
+function trimTrailingUrlPunctuation(raw: string): { clean: string; trailing: string } {
+  let clean = raw;
+  let trailing = '';
+  const trailingChars = new Set(['.', ',', '،', '؛', ':', '!', '؟', '?', '"', "'", '>', ']', '}']);
+
+  while (clean.length > 0) {
+    const lastChar = clean[clean.length - 1];
+    if (trailingChars.has(lastChar)) {
+      trailing = lastChar + trailing;
+      clean = clean.slice(0, -1);
+      continue;
+    }
+    if (lastChar === ')') {
+      const openCount = (clean.match(/\(/g) || []).length;
+      const closeCount = (clean.match(/\)/g) || []).length;
+      if (closeCount > openCount) {
+        trailing = lastChar + trailing;
+        clean = clean.slice(0, -1);
+        continue;
+      }
+    }
+    break;
+  }
+
+  return { clean, trailing };
+}
+
+export function splitTextWithLinks(text: string): TextLinkSegment[] {
+  if (!text) return [];
+
+  const segments: TextLinkSegment[] = [];
+  let lastIndex = 0;
+  URL_DETECTION_REGEX.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = URL_DETECTION_REGEX.exec(text)) !== null) {
+    const matchIndex = match.index;
+    const rawMatch = match[0];
+
+    // Skip email addresses (preceded immediately by '@')
+    if (matchIndex > 0 && text[matchIndex - 1] === '@') {
+      continue;
+    }
+
+    const { clean, trailing } = trimTrailingUrlPunctuation(rawMatch);
+    const safeUrl = sanitizeExternalUrl(clean);
+    if (!safeUrl) {
+      continue;
+    }
+
+    if (matchIndex > lastIndex) {
+      segments.push({ text: text.slice(lastIndex, matchIndex) });
+    }
+
+    const inviteTarget = parseInviteTarget(safeUrl);
+    segments.push({
+      text: clean,
+      url: safeUrl,
+      inviteTarget,
+    });
+
+    if (trailing) {
+      segments.push({ text: trailing });
+    }
+
+    lastIndex = matchIndex + rawMatch.length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex) });
+  }
+
+  return segments.length > 0 ? segments : [{ text }];
+}
+
+export function extractFirstInviteUrl(text: string): string | null {
+  if (!text) return null;
+  const segments = splitTextWithLinks(text);
+  for (const seg of segments) {
+    if (seg.url && seg.inviteTarget) {
+      return seg.url;
+    }
+  }
+  const trimmed = text.trim();
+  if (INVITE_CODE_REGEX.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return null;
 }
 
 export async function compressImageFile(

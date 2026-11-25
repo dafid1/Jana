@@ -19,6 +19,7 @@ import {
   getDocFromServer,
   Firestore,
 } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Primary Firebase App
@@ -43,6 +44,7 @@ try {
 }
 export const db = firestoreInstance;
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 // Secondary Firebase App used solely by Admin (jehan) to create new accounts without signing out
 export function getSecondaryAuth() {

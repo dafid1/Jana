@@ -20,7 +20,7 @@ export const NewGroupModal: React.FC<NewGroupModalProps> = ({
   onClose,
 }) => {
   const { theme, currentUser, allUsers } = useAuth();
-  const { createGroup, joinGroupByInvite } = useChat();
+  const { createGroup, openInviteLink } = useChat();
 
   const [tab, setTab] = useState<'create' | 'join'>(initialTab);
   const [title, setTitle] = useState('');
@@ -102,11 +102,11 @@ export const NewGroupModal: React.FC<NewGroupModalProps> = ({
     setError('');
     setIsSubmitting(true);
     try {
-      await joinGroupByInvite(inviteInput);
+      await openInviteLink(inviteInput);
       setInviteInput('');
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'تعذر الانضمام للمجموعة');
+      setError(err instanceof Error ? err.message : 'تعذر فتح الرابط');
     } finally {
       setIsSubmitting(false);
     }
@@ -128,7 +128,7 @@ export const NewGroupModal: React.FC<NewGroupModalProps> = ({
             ) : (
               <Link2 className="w-5 h-5 text-[#2481cc]" />
             )}
-            <span>{tab === 'create' ? 'إنشاء مجموعة جديدة' : 'انضمام لمجموعة برابط'}</span>
+            <span>{tab === 'create' ? 'إنشاء مجموعة جديدة' : 'فتح رابط مجموعة أو قناة'}</span>
           </h2>
           <button
             onClick={onClose}
@@ -330,11 +330,11 @@ export const NewGroupModal: React.FC<NewGroupModalProps> = ({
         ) : (
           <form onSubmit={handleJoinByInvite} className="space-y-4">
             <p className="text-xs text-[#7f91a4] leading-relaxed">
-              الصق رابط الدعوة للمجموعة أو أدخل رمز الدعوة (مثال:{' '}
+              الصق رابط الدعوة للمجموعة أو القناة أو أدخل رمز الدعوة (مثال:{' '}
               <span className="font-mono text-[#2481cc]" dir="ltr">
                 JNX-XXXX1234
               </span>
-              ) للانضمام فوراً.
+              ) لفتحها والانضمام إليها.
             </p>
 
             <div>
@@ -361,7 +361,7 @@ export const NewGroupModal: React.FC<NewGroupModalProps> = ({
               disabled={isSubmitting || !inviteInput.trim()}
               className="w-full py-2.5 rounded-xl bg-[#2481cc] hover:bg-[#2172b5] text-white font-bold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50"
             >
-              {isSubmitting ? 'جاري الانضمام...' : 'الانضمام للمجموعة الآن'}
+              {isSubmitting ? 'جاري الفتح...' : 'فتح المجموعة أو القناة'}
             </button>
           </form>
         )}

@@ -223,30 +223,133 @@ export async function fetchLatestCalculatorLock(): Promise<CalculatorLockPublicC
   return inFlightLockFetch;
 }
 
+const DECOY_LOCK_CACHE_KEY = 'janax_decoy_lock_cache_v1';
+
+export function getCachedDecoyLock(): CalculatorLockPublicConfig | null {
+  try {
+    const raw = localStorage.getItem(DECOY_LOCK_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CalculatorLockPublicConfig>;
+    if (
+      typeof parsed?.pinHash === 'string' &&
+      parsed.pinHash.length === 64 &&
+      typeof parsed.salt === 'string' &&
+      parsed.salt.length >= 16 &&
+      typeof parsed.pinLength === 'number' &&
+      typeof parsed.version === 'number' &&
+      parsed.version >= 1
+    ) {
+      return parsed as CalculatorLockPublicConfig;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedDecoyLock(config: CalculatorLockPublicConfig | null): void {
+  try {
+    if (!config) {
+      localStorage.removeItem(DECOY_LOCK_CACHE_KEY);
+    } else {
+      localStorage.setItem(DECOY_LOCK_CACHE_KEY, JSON.stringify(config));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export async function fetchLatestDecoyLock(): Promise<CalculatorLockPublicConfig | null> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return getCachedDecoyLock();
+  }
+  const decoyRef = doc(db, 'appConfig', 'decoyLock');
+  try {
+    const snap = await Promise.race([
+      getDocFromServer(decoyRef),
+      new Promise<'TIMEOUT'>((resolve) => setTimeout(() => resolve('TIMEOUT'), 2500)),
+    ]);
+    if (snap !== 'TIMEOUT') {
+      if (snap.exists()) {
+        const data = snap.data() as CalculatorLockPublicConfig;
+        setCachedDecoyLock(data);
+        return data;
+      }
+      setCachedDecoyLock(null);
+      return null;
+    }
+    const cacheSnap = await getDoc(decoyRef);
+    if (cacheSnap.exists()) {
+      const data = cacheSnap.data() as CalculatorLockPublicConfig;
+      setCachedDecoyLock(data);
+      return data;
+    }
+    return getCachedDecoyLock();
+  } catch {
+    return getCachedDecoyLock();
+  }
+}
+
 export async function verifyCalculatorPin(
   enteredPin: string,
-  prefetchedConfig?: CalculatorLockPublicConfig | null
-): Promise<{ matched: boolean; version: number; config: CalculatorLockPublicConfig | null }> {
+  prefetchedConfig?: CalculatorLockPublicConfig | null,
+  prefetchedDecoyConfig?: CalculatorLockPublicConfig | null
+): Promise<{
+  matched: boolean;
+  mode: 'real' | 'decoy' | 'invalid';
+  version: number;
+  config: CalculatorLockPublicConfig | null;
+}> {
   const normalized = normalizeArabicDigits(enteredPin).trim();
   if (!/^\d{4,12}$/.test(normalized)) {
-    return { matched: false, version: prefetchedConfig?.version ?? 0, config: prefetchedConfig ?? null };
+    return {
+      matched: false,
+      mode: 'invalid',
+      version: prefetchedConfig?.version ?? 0,
+      config: prefetchedConfig ?? null,
+    };
   }
 
   const config = prefetchedConfig !== undefined ? prefetchedConfig : await fetchLatestCalculatorLock();
 
   if (config && config.pinHash && config.salt && config.version >= 1) {
     const computedHash = await sha256Hex(`${config.salt}:${normalized}`);
+    if (computedHash === config.pinHash) {
+      return {
+        matched: true,
+        mode: 'real',
+        version: config.version,
+        config,
+      };
+    }
+  } else if (normalized === DEFAULT_CALCULATOR_PIN) {
     return {
-      matched: computedHash === config.pinHash,
-      version: config.version,
-      config,
+      matched: true,
+      mode: 'real',
+      version: 0,
+      config: null,
     };
   }
 
-  // Only valid while Admin has never customized the default PIN
+  // Check optional Decoy PIN (never matches if not configured)
+  const decoyConfig =
+    prefetchedDecoyConfig !== undefined ? prefetchedDecoyConfig : await fetchLatestDecoyLock();
+  if (decoyConfig && decoyConfig.pinHash && decoyConfig.salt && decoyConfig.version >= 1) {
+    const decoyHash = await sha256Hex(`${decoyConfig.salt}:${normalized}`);
+    if (decoyHash === decoyConfig.pinHash) {
+      return {
+        matched: true,
+        mode: 'decoy',
+        version: decoyConfig.version,
+        config,
+      };
+    }
+  }
+
   return {
-    matched: normalized === DEFAULT_CALCULATOR_PIN,
-    version: 0,
-    config: null,
+    matched: false,
+    mode: 'invalid',
+    version: config?.version ?? 0,
+    config,
   };
 }
