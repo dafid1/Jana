@@ -29,6 +29,8 @@ export interface UserProfile {
   blockedUserIds?: string[];
   mutedChatIds?: string[];
   pinnedChatIds?: string[];
+  archivedChatIds?: string[];
+  manualUnreadChatIds?: string[];
   privacyHideLastSeen?: boolean;
   autoLockSeconds?: number; // 0 = immediate on background, 30, 60, 300, -1 = off
   screenSecurityEnabled?: boolean;
@@ -94,6 +96,8 @@ export interface Message {
   mediaName?: string;
   mediaSize?: string;
   voiceDuration?: number;
+  isVideoNote?: boolean;
+  viewsCount?: number;
   pollData?: PollData;
   replyToId?: string;
   replyToText?: string;

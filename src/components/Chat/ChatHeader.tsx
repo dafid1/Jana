@@ -302,7 +302,7 @@ export const ChatHeader: React.FC = React.memo(() => {
           className={`h-15 border-b px-3 sm:px-4 flex items-center justify-between shrink-0 z-10 backdrop-blur-md transition-colors duration-150 select-none ${
             theme === 'light'
               ? 'bg-white/95 border-slate-200/80 text-slate-900'
-              : 'bg-[#111923]/95 border-white/[0.06] text-white'
+              : 'bg-[#17212b]/95 border-white/[0.06] text-white'
           }`}
         >
           <div className="flex items-center gap-2.5 min-w-0">
@@ -476,7 +476,7 @@ export const ChatHeader: React.FC = React.memo(() => {
       className={`h-15 border-b px-3 sm:px-4 flex items-center justify-between shrink-0 z-10 backdrop-blur-md transition-colors duration-150 select-none ${
         theme === 'light'
           ? 'bg-white/95 border-slate-200/80'
-          : 'bg-[#111923]/95 border-white/[0.06]'
+          : 'bg-[#17212b]/95 border-white/[0.06]'
       }`}
     >
       {/* Left (RTL Start): Avatar & Info */}

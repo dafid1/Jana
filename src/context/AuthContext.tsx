@@ -126,6 +126,8 @@ interface AuthContextType {
   toggleBlockUser: (targetUid: string) => Promise<boolean>;
   toggleMuteChat: (chatId: string) => Promise<boolean>;
   togglePinChat: (chatId: string) => Promise<boolean>;
+  toggleArchiveChat: (chatId: string) => Promise<boolean>;
+  toggleMarkChatUnread: (chatId: string, forceState?: boolean) => Promise<boolean>;
   updatePrivacySettings: (settings: {
     privacyHideLastSeen?: boolean;
     autoLockSeconds?: number;
@@ -1336,6 +1338,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [currentUser, userProfile?.pinnedChatIds, updateUserProfile]
   );
 
+  const toggleArchiveChat = useCallback(
+    async (chatId: string): Promise<boolean> => {
+      if (!currentUser || !chatId) return false;
+      const currentArchived = Array.isArray(userProfile?.archivedChatIds)
+        ? userProfile.archivedChatIds
+        : [];
+      const isArchived = currentArchived.includes(chatId);
+      const nextArchived = isArchived
+        ? currentArchived.filter((id) => id !== chatId)
+        : [chatId, ...currentArchived].slice(0, 500);
+      await updateUserProfile({ archivedChatIds: nextArchived });
+      return !isArchived;
+    },
+    [currentUser, userProfile?.archivedChatIds, updateUserProfile]
+  );
+
+  const toggleMarkChatUnread = useCallback(
+    async (chatId: string, forceState?: boolean): Promise<boolean> => {
+      if (!currentUser || !chatId) return false;
+      const currentManualUnread = Array.isArray(userProfile?.manualUnreadChatIds)
+        ? userProfile.manualUnreadChatIds
+        : [];
+      const isUnread = currentManualUnread.includes(chatId);
+      const nextState = typeof forceState === 'boolean' ? forceState : !isUnread;
+      if (nextState === isUnread) return isUnread;
+      const nextList = nextState
+        ? [chatId, ...currentManualUnread].slice(0, 500)
+        : currentManualUnread.filter((id) => id !== chatId);
+      await updateUserProfile({ manualUnreadChatIds: nextList });
+      return nextState;
+    },
+    [currentUser, userProfile?.manualUnreadChatIds, updateUserProfile]
+  );
+
   const updatePrivacySettings = useCallback(
     async (settings: {
       privacyHideLastSeen?: boolean;
@@ -1398,6 +1434,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       toggleBlockUser,
       toggleMuteChat,
       togglePinChat,
+      toggleArchiveChat,
+      toggleMarkChatUnread,
       updatePrivacySettings,
     }),
     [
@@ -1434,6 +1472,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       toggleBlockUser,
       toggleMuteChat,
       togglePinChat,
+      toggleArchiveChat,
+      toggleMarkChatUnread,
       updatePrivacySettings,
     ]
   );

@@ -39,6 +39,9 @@ export const MessageList: React.FC = () => {
   const prevScrollHeightRef = useRef<number | null>(null);
 
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [stickyDateLabel, setStickyDateLabel] = useState<string | null>(null);
+  const [isStickyDateVisible, setIsStickyDateVisible] = useState(false);
+  const stickyDateTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -103,6 +106,7 @@ export const MessageList: React.FC = () => {
   useEffect(() => {
     return () => {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      if (stickyDateTimerRef.current) clearTimeout(stickyDateTimerRef.current);
     };
   }, []);
 
@@ -212,6 +216,26 @@ export const MessageList: React.FC = () => {
       showScrollBottomRef.current = nextShow;
       setShowScrollBottom(nextShow);
     }
+
+    // Update Telegram sticky floating date pill from topmost visible message
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const msgEls = containerRef.current.querySelectorAll<HTMLElement>('[data-date-label]');
+    let topVisibleDate: string | null = null;
+    for (let i = 0; i < msgEls.length; i++) {
+      const rect = msgEls[i].getBoundingClientRect();
+      if (rect.bottom > containerRect.top + 28) {
+        topVisibleDate = msgEls[i].dataset.dateLabel || null;
+        break;
+      }
+    }
+    if (topVisibleDate) {
+      setStickyDateLabel(topVisibleDate);
+      setIsStickyDateVisible(true);
+      if (stickyDateTimerRef.current) clearTimeout(stickyDateTimerRef.current);
+      stickyDateTimerRef.current = setTimeout(() => {
+        setIsStickyDateVisible(false);
+      }, 1400);
+    }
   }, []);
 
   const getWallpaperClass = () => {
@@ -230,15 +254,19 @@ export const MessageList: React.FC = () => {
 
   const messageItemsWithDividers = useMemo(() => {
     const now = new Date();
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+    const yesterdayKey = `${yesterday.getFullYear()}-${yesterday.getMonth()}-${yesterday.getDate()}`;
     let lastDate = '';
 
-    return messages.map((msg) => {
+    return messages.map((msg, idx) => {
       const msgDate = new Date(msg.createdAt);
       const msgKey = `${msgDate.getFullYear()}-${msgDate.getMonth()}-${msgDate.getDate()}`;
       const dateStr =
         msgKey === todayKey
           ? 'اليوم'
+          : msgKey === yesterdayKey
+          ? 'أمس'
           : msgDate.toLocaleDateString('ar-SA', { month: 'long', day: 'numeric' });
 
       const showDateDivider = dateStr !== lastDate;
@@ -246,7 +274,44 @@ export const MessageList: React.FC = () => {
         lastDate = dateStr;
       }
 
-      return { msg, dateStr, showDateDivider };
+      const prevMsg = idx > 0 ? messages[idx - 1] : null;
+      const nextMsg = idx < messages.length - 1 ? messages[idx + 1] : null;
+
+      const isSameSenderAsPrev =
+        Boolean(prevMsg) &&
+        !showDateDivider &&
+        prevMsg!.senderId === msg.senderId &&
+        !prevMsg!.isDeleted &&
+        !msg.isDeleted &&
+        prevMsg!.type !== 'sticker' &&
+        msg.type !== 'sticker' &&
+        prevMsg!.type !== 'call' &&
+        msg.type !== 'call' &&
+        Math.abs(new Date(msg.createdAt).getTime() - new Date(prevMsg!.createdAt).getTime()) < 180000;
+
+      const nextDate = nextMsg ? new Date(nextMsg.createdAt) : null;
+      const nextKey = nextDate
+        ? `${nextDate.getFullYear()}-${nextDate.getMonth()}-${nextDate.getDate()}`
+        : '';
+      const isSameSenderAsNext =
+        Boolean(nextMsg) &&
+        nextKey === msgKey &&
+        nextMsg!.senderId === msg.senderId &&
+        !nextMsg!.isDeleted &&
+        !msg.isDeleted &&
+        nextMsg!.type !== 'sticker' &&
+        msg.type !== 'sticker' &&
+        nextMsg!.type !== 'call' &&
+        msg.type !== 'call' &&
+        Math.abs(new Date(nextMsg!.createdAt).getTime() - new Date(msg.createdAt).getTime()) < 180000;
+
+      return {
+        msg,
+        dateStr,
+        showDateDivider,
+        isFirstInGroup: !isSameSenderAsPrev,
+        isLastInGroup: !isSameSenderAsNext,
+      };
     });
   }, [messages]);
 
@@ -257,14 +322,14 @@ export const MessageList: React.FC = () => {
         className={`shrink-0 border-b px-3 py-2 flex items-center gap-2 z-20 backdrop-blur-md transition-colors duration-150 ${
           theme === 'light'
             ? 'bg-white/95 border-slate-200/80 text-slate-900'
-            : 'bg-[#111923]/95 border-white/[0.06] text-white'
+            : 'bg-[#17212b]/95 border-white/[0.06] text-white'
         }`}
       >
         <div
-          className={`flex-1 flex items-center gap-2 rounded-xl px-3 py-1.5 border transition-all duration-150 focus-within:border-[#2481cc] focus-within:ring-2 ${
+          className={`flex-1 flex items-center gap-2 rounded-xl px-3 py-1.5 border transition-all duration-150 focus-within:border-[#3390ec] focus-within:ring-2 ${
             theme === 'light'
-              ? 'bg-slate-100/90 border-slate-200/80 text-slate-900 focus-within:bg-white focus-within:ring-[#2481cc]/20'
-              : 'bg-[#1a2533] border-white/[0.07] text-white focus-within:bg-[#1e2b3b] focus-within:ring-[#2481cc]/25'
+              ? 'bg-slate-100/90 border-slate-200/80 text-slate-900 focus-within:bg-white focus-within:ring-[#3390ec]/20'
+              : 'bg-[#202b36] border-white/[0.07] text-white focus-within:bg-[#243240] focus-within:ring-[#3390ec]/25'
           }`}
         >
           <Search className="w-4 h-4 text-[#8ea0b5] shrink-0" />
@@ -290,7 +355,7 @@ export const MessageList: React.FC = () => {
             <button
               type="button"
               onClick={handleClearSearch}
-              className="p-0.5 rounded-lg text-[#8ea0b5] hover:text-[#2481cc] transition-colors cursor-pointer"
+              className="p-0.5 rounded-lg text-[#8ea0b5] hover:text-[#3390ec] transition-colors cursor-pointer"
               title="مسح البحث"
               aria-label="مسح نص البحث"
             >
@@ -307,8 +372,8 @@ export const MessageList: React.FC = () => {
                 matchedMessageIds.length === 0
                   ? 'bg-rose-500/15 text-rose-400'
                   : theme === 'light'
-                  ? 'bg-[#2481cc]/10 text-[#2481cc]'
-                  : 'bg-[#2481cc]/20 text-sky-300'
+                  ? 'bg-[#3390ec]/10 text-[#3390ec]'
+                  : 'bg-[#3390ec]/20 text-sky-300'
               }`}
             >
               {matchedMessageIds.length === 0
@@ -354,11 +419,30 @@ export const MessageList: React.FC = () => {
       {/* Pinned Message Bar */}
       <PinnedMessageBanner />
 
+      {/* Telegram Sticky Floating Date Pill on Scroll */}
+      {stickyDateLabel && messages.length > 0 && (
+        <div
+          className={`pointer-events-none absolute top-[62px] inset-x-0 z-10 flex justify-center transition-opacity duration-300 ${
+            isStickyDateVisible ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          <span
+            className={`px-3 py-1 rounded-full text-[11px] font-semibold backdrop-blur-md shadow-sm ${
+              theme === 'light'
+                ? 'bg-slate-900/45 text-white'
+                : 'bg-[#17212b]/85 text-white/95 border border-white/[0.08]'
+            }`}
+          >
+            {stickyDateLabel}
+          </span>
+        </div>
+      )}
+
       {/* Messages Scroll Area */}
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className={`flex-1 overflow-y-auto smooth-scroll-area px-2 sm:px-6 py-4 space-y-1 transition-colors duration-300 ${getWallpaperClass()}`}
+        className={`flex-1 overflow-y-auto smooth-scroll-area px-2 sm:px-6 py-4 transition-colors duration-300 ${getWallpaperClass()}`}
       >
         {loadingMessages ? (
           <div className="h-full flex items-center justify-center">
@@ -489,41 +573,45 @@ export const MessageList: React.FC = () => {
               </div>
             )}
 
-            {messageItemsWithDividers.map(({ msg, dateStr, showDateDivider }) => (
-              <React.Fragment key={msg.id}>
-                {showDateDivider && (
-                  <div className="flex justify-center my-3 select-none">
-                    <span
-                      className={`px-3 py-1 rounded-full text-[11px] font-semibold backdrop-blur-md border shadow-xs ${
-                        theme === 'light'
-                          ? 'bg-slate-900/45 text-white border-white/15'
-                          : 'bg-[#111923]/80 text-white/90 border-white/[0.08]'
-                      }`}
-                    >
-                      {dateStr}
-                    </span>
-                  </div>
-                )}
+            {messageItemsWithDividers.map(
+              ({ msg, dateStr, showDateDivider, isFirstInGroup, isLastInGroup }) => (
+                <div key={msg.id} data-date-label={dateStr}>
+                  {showDateDivider && (
+                    <div className="flex justify-center my-3 select-none">
+                      <span
+                        className={`px-3 py-1 rounded-full text-[11px] font-semibold backdrop-blur-md shadow-xs ${
+                          theme === 'light'
+                            ? 'bg-slate-900/40 text-white'
+                            : 'bg-[#17212b]/80 text-white/90 border border-white/[0.08]'
+                        }`}
+                      >
+                        {dateStr}
+                      </span>
+                    </div>
+                  )}
 
-                {firstUnreadMessageId === msg.id && (
-                  <div className="flex items-center gap-3 my-2.5 px-2 select-none">
-                    <div className="flex-1 h-px bg-[#2481cc]/35" />
-                    <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-[#2481cc]/15 text-[#2481cc] border border-[#2481cc]/30 backdrop-blur-xs">
-                      رسائل غير مقروءة
-                    </span>
-                    <div className="flex-1 h-px bg-[#2481cc]/35" />
-                  </div>
-                )}
+                  {firstUnreadMessageId === msg.id && (
+                    <div className="flex items-center gap-3 my-2.5 px-2 select-none">
+                      <div className="flex-1 h-px bg-[#3390ec]/35" />
+                      <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-[#3390ec]/15 text-[#3390ec] border border-[#3390ec]/30 backdrop-blur-xs">
+                        رسائل غير مقروءة
+                      </span>
+                      <div className="flex-1 h-px bg-[#3390ec]/35" />
+                    </div>
+                  )}
 
-                <MessageBubble
-                  message={msg}
-                  isHighlighted={highlightedMessageId === msg.id}
-                  searchQuery={trimmedSearchQuery}
-                  isActiveSearchMatch={activeSearchMatchId === msg.id}
-                  onJumpToMessage={jumpToMessage}
-                />
-              </React.Fragment>
-            ))}
+                  <MessageBubble
+                    message={msg}
+                    isFirstInGroup={isFirstInGroup}
+                    isLastInGroup={isLastInGroup}
+                    isHighlighted={highlightedMessageId === msg.id}
+                    searchQuery={trimmedSearchQuery}
+                    isActiveSearchMatch={activeSearchMatchId === msg.id}
+                    onJumpToMessage={jumpToMessage}
+                  />
+                </div>
+              )
+            )}
           </>
         )}
         <div ref={messagesEndRef} />

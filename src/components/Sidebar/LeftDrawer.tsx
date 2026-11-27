@@ -67,15 +67,15 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
       {/* Drawer Panel */}
       <div
         className={`relative z-10 w-80 max-w-[85vw] h-full flex flex-col shadow-2xl transition-transform duration-300 ease-in-out ${
-          theme === 'light' ? 'bg-white text-slate-900' : 'bg-[#111923] text-white'
+          theme === 'light' ? 'bg-white text-slate-900' : 'bg-[#17212b] text-white'
         }`}
       >
         {/* User Info Header */}
         <div
           className={`p-5 flex flex-col justify-end relative border-b ${
             theme === 'light'
-              ? 'bg-[#2481cc] border-[#1d6eb0] text-white'
-              : 'bg-[#162230] border-white/[0.06] text-white'
+              ? 'bg-[#3390ec] border-[#287cd1] text-white'
+              : 'bg-[#1f2c3a] border-[#0e1621] text-white'
           }`}
         >
           <button
@@ -236,7 +236,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
             <span className="text-sm font-medium">الرسائل المحفوظة</span>
           </button>
 
-          <hr className={`my-1.5 ${theme === 'light' ? 'border-slate-100' : 'border-white/[0.06]'}`} />
+          <hr className={`my-1.5 ${theme === 'light' ? 'border-slate-100' : 'border-[#0e1621]'}`} />
 
           {/* Night Mode Toggle */}
           <button
@@ -258,7 +258,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
             </div>
             <div
               className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
-                theme === 'dark' ? 'bg-[#2481cc]' : 'bg-slate-300'
+                theme === 'dark' ? 'bg-[#3390ec]' : 'bg-slate-300'
               }`}
             >
               <div

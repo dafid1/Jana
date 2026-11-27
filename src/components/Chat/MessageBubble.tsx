@@ -28,6 +28,9 @@ import {
   PhoneMissed,
   Film,
   Globe,
+  Eye,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { Chat, Message } from '../../types/telegram';
 import { useAuth } from '../../context/AuthContext';
@@ -127,6 +130,7 @@ const renderTextWithMentions = (
 
 export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   message,
+  isFirstInGroup = true,
   isLastInGroup = true,
   isHighlighted = false,
   searchQuery,
@@ -158,7 +162,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   } = useChat();
 
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
+  const [voiceCurrentTime, setVoiceCurrentTime] = useState(0);
+  const [voiceTotalDuration, setVoiceTotalDuration] = useState(message.voiceDuration || 5);
   const [voiceSpeed, setVoiceSpeed] = useState<'1x' | '1.5x' | '2x'>('1x');
+  const [isPlayingVideoNote, setIsPlayingVideoNote] = useState(false);
+  const [isVideoNoteMuted, setIsVideoNoteMuted] = useState(false);
+  const [videoNoteProgress, setVideoNoteProgress] = useState(0);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -184,6 +193,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   const isSticker = message.type === 'sticker' && !isDeleted;
   const isDice = message.type === 'dice' && !isDeleted;
   const isCallLog = message.type === 'call' && !isDeleted;
+  const isVideoNote = message.type === 'video' && Boolean(message.isVideoNote) && !isDeleted;
   const isSelected = isSelectionMode && selectedMessageIds.includes(message.id);
   const canDeleteForEveryone = isMe || isActiveChatModerator || activeChat?.type === 'saved';
 
@@ -222,6 +232,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   }, [detectedInviteUrl, resolveInvitePreview]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoNoteRef = useRef<HTMLVideoElement | null>(null);
   const downloadAbortRef = useRef<AbortController | null>(null);
   const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number; active: boolean }>({
@@ -617,20 +628,70 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
     : null;
   const isOutgoingDark = isMe && theme === 'dark';
 
+  // Deterministic 26-bar voice waveform seeded from message.id
+  const voiceWaveformBars = React.useMemo(() => {
+    const seedStr = message.id || 'voice';
+    const bars: number[] = [];
+    let hash = 0;
+    for (let i = 0; i < seedStr.length; i++) {
+      hash = (hash * 31 + seedStr.charCodeAt(i)) >>> 0;
+    }
+    for (let i = 0; i < 26; i++) {
+      hash = (hash * 1664525 + 1013904223) >>> 0;
+      const pct = 22 + (hash % 78);
+      bars.push(pct);
+    }
+    return bars;
+  }, [message.id]);
+
+  const voiceProgressRatio =
+    voiceTotalDuration > 0 ? Math.min(1, Math.max(0, voiceCurrentTime / voiceTotalDuration)) : 0;
+
+  const handleSeekVoice = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = Math.min(Math.max(0, e.clientX - rect.left), rect.width);
+    const ratio = rect.width > 0 ? relX / rect.width : 0;
+    if (audioRef.current && Number.isFinite(audioRef.current.duration) && audioRef.current.duration > 0) {
+      audioRef.current.currentTime = ratio * audioRef.current.duration;
+      setVoiceCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const bubbleBgHex = isMe
+    ? theme === 'light'
+      ? '#effdde'
+      : '#2b5278'
+    : theme === 'light'
+    ? '#ffffff'
+    : '#182533';
+
+  const bubbleRadiusClasses = isSticker || isDice || isVideoNote
+    ? ''
+    : isMe
+    ? `${isFirstInGroup ? 'rounded-t-2xl' : 'rounded-tr-2xl rounded-tl-md'} ${
+        isLastInGroup ? 'rounded-br-2xl rounded-bl-none' : 'rounded-br-2xl rounded-bl-md'
+      }`
+    : `${isFirstInGroup ? 'rounded-t-2xl' : 'rounded-tl-2xl rounded-tr-md'} ${
+        isLastInGroup ? 'rounded-bl-2xl rounded-br-none' : 'rounded-bl-2xl rounded-br-md'
+      }`;
+
   return (
     <>
       <div
         id={`msg-${message.id}`}
         data-message-id={message.id}
-        className={`group relative flex items-end gap-2 my-1 px-4 touch-pan-y transition-colors duration-200 ${
+        className={`group relative flex items-end gap-2 px-3 sm:px-4 touch-pan-y transition-colors duration-200 ${
+          isFirstInGroup ? 'mt-2.5' : 'mt-[2px]'
+        } ${isLastInGroup ? 'mb-0.5' : ''} ${
           isSelectionMode ? 'cursor-pointer select-none' : ''
         } ${isMe ? 'justify-end' : 'justify-start'} ${
           isSelected
             ? theme === 'light'
-              ? 'bg-[#2481cc]/12 rounded-2xl py-1'
-              : 'bg-[#2481cc]/18 rounded-2xl py-1'
+              ? 'bg-[#3390ec]/12 rounded-2xl py-1'
+              : 'bg-[#3390ec]/18 rounded-2xl py-1'
             : isHighlighted || isActiveSearchMatch
-            ? 'bg-[#2481cc]/20 rounded-2xl py-1'
+            ? 'bg-[#3390ec]/20 rounded-2xl py-1'
             : ''
         }`}
         onMouseLeave={() => setShowReactionPicker(false)}
@@ -694,19 +755,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
           </div>
         )}
 
-        {/* Sender Avatar in Group chat for others */}
-        {!isMe && !isChannel && activeChat?.type === 'group' && isLastInGroup && (
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
-              message.senderId
-            )} mb-1`}
-          >
-            {senderPhoto ? (
-              <img src={senderPhoto} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
-            ) : (
-              <span>{getInitials(senderDisplayName)}</span>
-            )}
-          </div>
+        {/* Sender Avatar in Group chat for others (aligned spacer when mid-group) */}
+        {!isMe && !isChannel && activeChat?.type === 'group' && (
+          isLastInGroup ? (
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
+                message.senderId
+              )} mb-0.5`}
+            >
+              {senderPhoto ? (
+                <img src={senderPhoto} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+              ) : (
+                <span>{getInitials(senderDisplayName)}</span>
+              )}
+            </div>
+          ) : (
+            <div className="w-8 shrink-0" aria-hidden="true" />
+          )
         )}
 
         {/* Bubble Container */}
@@ -715,23 +780,39 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
             transform: swipeOffset !== 0 ? `translateX(${swipeOffset}px)` : undefined,
             transition: isSwiping ? 'none' : 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
-          className={`relative max-w-[85%] sm:max-w-[70%] text-sm rounded-2xl transition-shadow ${
-            isSticker || isDice
+          className={`relative max-w-[85%] sm:max-w-[70%] text-sm transition-shadow ${bubbleRadiusClasses} ${
+            isSticker || isDice || isVideoNote
               ? 'bg-transparent shadow-none p-0'
               : isMe
               ? theme === 'light'
-                ? 'bg-[#ebfad6] border border-emerald-900/10 text-slate-900 rounded-br-xs shadow-xs'
-                : 'bg-[#244a70] border border-white/[0.06] text-white rounded-br-xs shadow-sm'
+                ? 'bg-[#effdde] text-slate-900 shadow-xs'
+                : 'bg-[#2b5278] text-white shadow-sm'
               : theme === 'light'
-              ? 'bg-white border border-slate-200/80 text-slate-900 rounded-bl-xs shadow-xs'
-              : 'bg-[#162230] border border-white/[0.07] text-white rounded-bl-xs shadow-sm'
-          } ${!isSticker && !isDice ? 'px-3.5 py-2.5' : ''} ${
-            isActiveSearchMatch && !isSticker && !isDice ? 'ring-2 ring-amber-400/80' : ''
-          } ${isSelected && !isSticker && !isDice ? 'ring-2 ring-[#2481cc]' : ''}`}
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'bg-[#182533] text-white shadow-sm'
+          } ${!isSticker && !isDice && !isVideoNote ? 'px-3.5 py-2' : ''} ${
+            isActiveSearchMatch && !isSticker && !isDice && !isVideoNote ? 'ring-2 ring-amber-400/80' : ''
+          } ${isSelected && !isSticker && !isDice && !isVideoNote ? 'ring-2 ring-[#3390ec]' : ''}`}
         >
-          {/* Sender Name for group messages */}
-          {!isMe && !isChannel && activeChat?.type === 'group' && (
-            <div className="text-xs font-bold text-[#2481cc] mb-1">
+          {/* Authentic SVG Telegram Bubble Tail on last bubble of group */}
+          {isLastInGroup && !isSticker && !isDice && !isVideoNote && (
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 11 20"
+              className={`absolute bottom-0 w-[9px] h-[16px] pointer-events-none ${
+                isMe ? '-left-[7px]' : '-right-[7px] -scale-x-100'
+              }`}
+            >
+              <path
+                d="M11 0v20H0c5.5-2.5 8.5-7.5 11-20z"
+                fill={bubbleBgHex}
+              />
+            </svg>
+          )}
+
+          {/* Sender Name for first message in group */}
+          {!isMe && !isChannel && activeChat?.type === 'group' && isFirstInGroup && (
+            <div className="text-xs font-bold text-[#3390ec] mb-1">
               {senderDisplayName}
             </div>
           )}
@@ -962,8 +1043,82 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                 </div>
               )}
 
-              {/* 5. VIDEO MESSAGE */}
-              {message.type === 'video' && message.mediaUrl && (
+              {/* 5. VIDEO MESSAGE OR CIRCULAR TELEGRAM VIDEO NOTE */}
+              {message.type === 'video' && message.mediaUrl && isVideoNote && (
+                <div className="relative w-52 h-52 sm:w-56 sm:h-56 my-1 select-none" data-no-gesture="true">
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const vid = videoNoteRef.current;
+                      if (!vid) return;
+                      if (vid.paused) {
+                        vid.play().catch(() => {});
+                        setIsPlayingVideoNote(true);
+                      } else {
+                        vid.pause();
+                        setIsPlayingVideoNote(false);
+                      }
+                    }}
+                    className="relative w-full h-full rounded-full overflow-hidden shadow-xl bg-black cursor-pointer border-2 border-[#3390ec]/50"
+                  >
+                    <video
+                      ref={videoNoteRef}
+                      src={message.mediaUrl}
+                      playsInline
+                      loop
+                      muted={isVideoNoteMuted}
+                      onTimeUpdate={(e) => {
+                        const vid = e.currentTarget;
+                        if (vid.duration > 0) {
+                          setVideoNoteProgress((vid.currentTime / vid.duration) * 100);
+                        }
+                      }}
+                      onEnded={() => setIsPlayingVideoNote(false)}
+                      className="w-full h-full object-cover"
+                    />
+                    {!isPlayingVideoNote && (
+                      <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
+                        <div className="w-12 h-12 rounded-full bg-black/55 backdrop-blur-sm text-white flex items-center justify-center">
+                          <Play className="w-6 h-6 ml-0.5" />
+                        </div>
+                      </div>
+                    )}
+                    {/* Circular Progress Ring */}
+                    <svg
+                      viewBox="0 0 100 100"
+                      className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                    >
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r="48.5"
+                        fill="none"
+                        stroke="#3390ec"
+                        strokeWidth="2.5"
+                        strokeDasharray={304.7}
+                        strokeDashoffset={304.7 - (304.7 * videoNoteProgress) / 100}
+                        className="transition-[stroke-dashoffset] duration-100 ease-linear"
+                      />
+                    </svg>
+                  </div>
+
+                  {/* Video Note Duration & Sound Pill */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsVideoNoteMuted((prev) => !prev);
+                    }}
+                    className="absolute bottom-2 right-2 px-2 py-1 rounded-full bg-black/65 backdrop-blur-md text-white text-[10px] font-mono font-semibold flex items-center gap-1 cursor-pointer"
+                    title={isVideoNoteMuted ? 'تشغيل الصوت' : 'كتم الصوت'}
+                  >
+                    {isVideoNoteMuted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+                    <span>{formatDuration(message.voiceDuration || 5)}</span>
+                  </button>
+                </div>
+              )}
+
+              {message.type === 'video' && message.mediaUrl && !isVideoNote && (
                 <div className="mb-1.5 overflow-hidden rounded-xl bg-black/80 border border-white/10">
                   <video
                     src={message.mediaUrl}
@@ -976,7 +1131,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                   {(message.mediaName || message.mediaSize) && (
                     <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[11px] text-slate-300 bg-black/60">
                       <span className="flex items-center gap-1.5 truncate">
-                        <Film className="w-3.5 h-3.5 text-[#2481cc] shrink-0" />
+                        <Film className="w-3.5 h-3.5 text-[#3390ec] shrink-0" />
                         <span className="truncate">{message.mediaName || 'فيديو'}</span>
                       </span>
                       {message.mediaSize && (
@@ -987,54 +1142,95 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                 </div>
               )}
 
-              {/* 6. VOICE MESSAGE */}
+              {/* 6. VOICE MESSAGE WITH INTERACTIVE SCRUBBABLE WAVEFORM */}
               {message.type === 'voice' && (
-                <div className="flex items-center gap-3 py-1 min-w-[220px]">
+                <div className="flex items-center gap-3 py-1 min-w-[235px]" data-no-gesture="true">
                   {message.mediaUrl && (
                     <audio
                       ref={audioRef}
                       src={message.mediaUrl}
-                      onEnded={() => setIsPlayingVoice(false)}
+                      onLoadedMetadata={(e) => {
+                        const dur = e.currentTarget.duration;
+                        if (Number.isFinite(dur) && dur > 0) {
+                          setVoiceTotalDuration(Math.round(dur));
+                        }
+                      }}
+                      onTimeUpdate={(e) => {
+                        setVoiceCurrentTime(e.currentTarget.currentTime);
+                      }}
+                      onEnded={() => {
+                        setIsPlayingVoice(false);
+                        setVoiceCurrentTime(0);
+                      }}
                       className="hidden"
                     />
                   )}
                   <button
+                    type="button"
                     onClick={handleToggleVoice}
-                    className="w-10 h-10 rounded-full bg-[#2481cc] text-white flex items-center justify-center shrink-0 hover:scale-105 transition-transform cursor-pointer"
+                    className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 hover:scale-105 transition-transform cursor-pointer ${
+                      isMe && theme === 'light'
+                        ? 'bg-[#4fae4e] text-white'
+                        : 'bg-[#3390ec] text-white'
+                    }`}
                   >
                     {isPlayingVoice ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
                   </button>
 
-                  <div className="flex-1 flex items-center gap-0.5 h-6">
-                    {[40, 70, 30, 90, 60, 100, 45, 80, 50, 75, 35, 85, 60, 40, 70, 50].map((h, i) => (
-                      <div
-                        key={i}
-                        className={`w-1 rounded-full transition-all duration-200 ${
-                          isPlayingVoice
-                            ? 'bg-[#2481cc] animate-tg-wave'
-                            : isMe
-                            ? 'bg-sky-200/60'
-                            : 'bg-[#7f91a4]'
-                        }`}
-                        style={{
-                          height: isPlayingVoice ? undefined : `${h}%`,
-                          animationDelay: `${i * 0.05}s`,
-                        }}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1">
-                    <span className="text-[10px] font-mono opacity-75">
-                      {formatDuration(message.voiceDuration || 5)}
-                    </span>
-                    <button
-                      onClick={handleCycleSpeed}
-                      className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[#2481cc]/30 text-[#2481cc] hover:bg-[#2481cc] hover:text-white transition-colors cursor-pointer"
-                      title="تغيير سرعة الصوت"
+                  <div className="flex-1 min-w-0">
+                    <div
+                      dir="ltr"
+                      onClick={handleSeekVoice}
+                      className="flex items-center gap-[2px] h-7 cursor-pointer select-none"
+                      title="اسحب أو اضغط للتقديم والترجيع"
                     >
-                      {voiceSpeed}
-                    </button>
+                      {voiceWaveformBars.map((h, i) => {
+                        const barRatio = (i + 1) / voiceWaveformBars.length;
+                        const isFilled = barRatio <= voiceProgressRatio;
+                        return (
+                          <div
+                            key={i}
+                            className={`flex-1 min-w-[2.5px] rounded-full transition-colors duration-100 ${
+                              isFilled
+                                ? isMe && theme === 'light'
+                                  ? 'bg-[#4fae4e]'
+                                  : 'bg-[#5cb0ff]'
+                                : isMe && theme === 'light'
+                                ? 'bg-[#4fae4e]/35'
+                                : isMe
+                                ? 'bg-sky-200/35'
+                                : 'bg-[#7f91a4]/45'
+                            } ${isPlayingVoice && !isFilled ? 'animate-tg-wave' : ''}`}
+                            style={{
+                              height: `${h}%`,
+                              animationDelay: `${i * 0.04}s`,
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-[10.5px] font-mono tabular-nums opacity-80">
+                        {isPlayingVoice || voiceCurrentTime > 0
+                          ? `${formatDuration(Math.floor(voiceCurrentTime))} / ${formatDuration(
+                              voiceTotalDuration
+                            )}`
+                          : formatDuration(voiceTotalDuration)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCycleSpeed}
+                        className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-bold transition-colors cursor-pointer ${
+                          isMe && theme === 'light'
+                            ? 'bg-[#4fae4e]/20 text-[#2e7d32] hover:bg-[#4fae4e] hover:text-white'
+                            : 'bg-[#3390ec]/25 text-sky-300 hover:bg-[#3390ec] hover:text-white'
+                        }`}
+                        title="تغيير سرعة الصوت"
+                      >
+                        {voiceSpeed}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1374,10 +1570,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
             </>
           )}
 
-          {/* Timestamp, Edited Badge and Read Receipts */}
+          {/* Timestamp, Channel Views, Edited Badge and Read Receipts */}
           <div
-            className={`flex items-center justify-end gap-1.5 mt-1 text-[10px] tabular-nums select-none ${
-              isMe
+            className={`flex items-center justify-end gap-1.5 mt-1 text-[10.5px] tabular-nums select-none ${
+              isSticker || isDice || isVideoNote
+                ? 'px-2 py-0.5 rounded-full bg-black/45 text-white backdrop-blur-xs w-fit mr-auto'
+                : isMe
                 ? theme === 'light'
                   ? 'text-emerald-800/75'
                   : 'text-sky-200/80'
@@ -1386,12 +1584,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                 : 'text-[#8ea0b5]'
             }`}
           >
-            {!isDeleted && message.editedAt && <span className="opacity-75">(معدلة)</span>}
+            {isChannel && !isDeleted && (
+              <span className="inline-flex items-center gap-0.5 opacity-80 ml-1" title="المشاهدات">
+                <Eye className="w-3 h-3" />
+                <span>{message.viewsCount || Math.max(1, message.readBy?.length || 1)}</span>
+              </span>
+            )}
+            {!isDeleted && message.editedAt && <span className="opacity-75">معدلة</span>}
             <span>{formatTelegramTime(message.createdAt)}</span>
             {isMe && !isDeleted && (
               <span
                 className={`inline-flex items-center gap-0.5 ${
-                  isReadByOthers ? 'text-[#38bdf8]' : 'opacity-65'
+                  isReadByOthers
+                    ? theme === 'light'
+                      ? 'text-[#4fae4e]'
+                      : 'text-[#5cb0ff]'
+                    : 'opacity-65'
                 }`}
                 title={readerNamesTooltip}
               >
@@ -1553,27 +1761,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
         </div>
       </div>
 
-      {/* Long-Press / Right-Click Action Menu Overlay */}
+      {/* Telegram Blur Spotlight Long-Press / Right-Click Action Overlay */}
       {showActionMenu && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-black/55 backdrop-blur-md animate-in fade-in duration-150"
           onClick={() => setShowActionMenu(false)}
           data-no-gesture="true"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-xs rounded-2xl shadow-2xl border overflow-hidden animate-in zoom-in-95 duration-150 ${
-              theme === 'light'
-                ? 'bg-white border-slate-200/80 text-slate-900'
-                : 'bg-[#111923] border-white/[0.08] text-white'
-            }`}
+            className="w-full max-w-xs flex flex-col gap-2.5 animate-in zoom-in-95 duration-150"
           >
+            {/* Floating Reaction Pill Bar Above Spotlighted Message */}
             {isActiveChatMember && !isDeleted && (
               <div
-                className={`flex items-center justify-between px-3 py-2.5 border-b overflow-x-auto gap-1 ${
+                className={`flex items-center justify-between px-3 py-2 rounded-full shadow-2xl border overflow-x-auto gap-1 ${
                   theme === 'light'
-                    ? 'border-slate-100 bg-slate-50/90'
-                    : 'border-white/[0.06] bg-[#162230]'
+                    ? 'bg-white border-slate-200/90'
+                    : 'bg-[#17212b] border-white/10'
                 }`}
               >
                 {QUICK_REACTIONS.slice(0, 7).map((emoji) => (
@@ -1591,16 +1796,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
               </div>
             )}
 
+            {/* Spotlighted Message Preview Card */}
             <div
-              className={`px-3.5 py-2.5 border-b text-xs ${
-                theme === 'light'
-                  ? 'border-slate-100 bg-slate-50/50'
-                  : 'border-white/[0.06] bg-black/20'
+              className={`px-3.5 py-2.5 rounded-2xl shadow-2xl border text-xs ${
+                isMe
+                  ? theme === 'light'
+                    ? 'bg-[#effdde] border-emerald-900/10 text-slate-900'
+                    : 'bg-[#2b5278] border-white/10 text-white'
+                  : theme === 'light'
+                  ? 'bg-white border-slate-200 text-slate-900'
+                  : 'bg-[#182533] border-white/10 text-white'
               }`}
             >
-              <div className="font-bold text-[#2481cc] truncate">{senderDisplayName}</div>
-              <div className="truncate opacity-80 mt-0.5">{getMessageReplyPreview(message)}</div>
+              <div className="font-bold text-[#3390ec] truncate">{senderDisplayName}</div>
+              <div className="line-clamp-3 opacity-90 mt-0.5 leading-relaxed">
+                {getMessageReplyPreview(message)}
+              </div>
             </div>
+
+            {/* Action Menu Sheet */}
+            <div
+              className={`rounded-2xl shadow-2xl border overflow-hidden ${
+                theme === 'light'
+                  ? 'bg-white border-slate-200/80 text-slate-900'
+                  : 'bg-[#17212b] border-white/[0.08] text-white'
+              }`}
+            >
 
             <div className="p-1.5 space-y-1">
               {!isDeleted && isActiveChatMember && (
@@ -1741,6 +1962,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                 <X className="w-3.5 h-3.5" />
                 <span>إلغاء</span>
               </button>
+            </div>
             </div>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { X, CheckCircle2, AlertCircle, Forward } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ChatProvider, useChat } from './context/ChatContext';
 import { CalculatorVault } from './components/Calculator/CalculatorVault';
-import { SidebarHeader } from './components/Sidebar/SidebarHeader';
+import { SidebarHeader, SearchResultTab } from './components/Sidebar/SidebarHeader';
 import { ChatList } from './components/Sidebar/ChatList';
 import { ChatHeader } from './components/Chat/ChatHeader';
 import { MessageList } from './components/Chat/MessageList';
@@ -148,6 +148,7 @@ const JanaXApp: React.FC = () => {
   const [isStoriesManuallyCollapsed, setIsStoriesManuallyCollapsed] = useState(false);
   const [isScrolledPastStories, setIsScrolledPastStories] = useState(false);
   const [expandStoriesSignal, setExpandStoriesSignal] = useState(0);
+  const [searchTab, setSearchTab] = useState<SearchResultTab>('chats');
 
   const lockToCalculator = useCallback(() => {
     setIsLeftDrawerOpen(false);
@@ -405,14 +406,16 @@ const JanaXApp: React.FC = () => {
 
       {/* Main JanaX Layout Container */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar (Chats List, Stories & Folders) */}
+        {/* Sidebar (Chats List, Stories, Folders & Full-Screen Telegram Compose Flows) */}
         <aside
-          className={`w-full md:w-85 lg:w-96 flex flex-col shrink-0 border-l transition-colors ${
-            activeChat ? 'hidden md:flex' : 'flex'
+          className={`relative w-full md:w-85 lg:w-96 flex flex-col shrink-0 border-l transition-colors overflow-hidden ${
+            activeChat && !(isNewChatOpen || groupModalMode !== null || isNewChannelOpen)
+              ? 'hidden md:flex'
+              : 'flex'
           } ${
             theme === 'light'
               ? 'bg-white border-slate-200/90'
-              : 'bg-[#111923] border-white/[0.06]'
+              : 'bg-[#17212b] border-[#0e1621]'
           }`}
         >
           <SidebarHeader
@@ -425,32 +428,68 @@ const JanaXApp: React.FC = () => {
               setExpandStoriesSignal((n) => n + 1);
             }}
             onOpenNewStory={() => setIsNewStoryOpen(true)}
+            searchTab={searchTab}
+            onSearchTabChange={setSearchTab}
           />
           <ChatList
             onOpenNewChat={() => setIsNewChatOpen(true)}
-            onOpenNewGroup={() => setGroupModalMode('create')}
-            onOpenJoinGroup={() => setGroupModalMode('join')}
-            onOpenNewChannel={() => setIsNewChannelOpen(true)}
             onOpenNewStory={() => setIsNewStoryOpen(true)}
             isStoriesManuallyCollapsed={isStoriesManuallyCollapsed}
             onCollapseStories={() => setIsStoriesManuallyCollapsed(true)}
             onScrolledPastStoriesChange={setIsScrolledPastStories}
             expandStoriesSignal={expandStoriesSignal}
+            searchTab={searchTab}
           />
+
+          <Suspense fallback={null}>
+            {isNewChatOpen && (
+              <NewChatModal
+                isOpen={isNewChatOpen}
+                onClose={() => setIsNewChatOpen(false)}
+                onOpenAdminUsers={() => setIsAdminUsersOpen(true)}
+                onOpenNewGroup={() => setGroupModalMode('create')}
+                onOpenNewChannel={() => setIsNewChannelOpen(true)}
+                onOpenJoinGroup={() => setGroupModalMode('join')}
+              />
+            )}
+
+            {groupModalMode !== null && (
+              <NewGroupModal
+                isOpen={groupModalMode !== null}
+                initialTab={groupModalMode || 'create'}
+                onClose={() => setGroupModalMode(null)}
+              />
+            )}
+
+            {isNewChannelOpen && (
+              <NewChannelModal
+                isOpen={isNewChannelOpen}
+                onClose={() => setIsNewChannelOpen(false)}
+              />
+            )}
+          </Suspense>
         </aside>
 
         {/* Center / Main Chat Area */}
         <main
           className={`flex-1 flex flex-col min-w-0 transition-all ${
-            !activeChat ? 'hidden md:flex' : 'flex'
+            !activeChat || isNewChatOpen || groupModalMode !== null || isNewChannelOpen
+              ? 'hidden md:flex'
+              : 'flex'
           }`}
         >
           {activeChat ? (
-            <div className="flex-1 flex flex-col h-full min-w-0">
-              <ChatHeader />
-              <MessageList />
-              <ChatInput onOpenPollModal={() => setIsPollOpen(true)} />
-            </div>
+            showInfoDrawer ? (
+              <Suspense fallback={null}>
+                <ProfileDrawer />
+              </Suspense>
+            ) : (
+              <div className="flex-1 flex flex-col h-full min-w-0">
+                <ChatHeader />
+                <MessageList />
+                <ChatInput onOpenPollModal={() => setIsPollOpen(true)} />
+              </div>
+            )
           ) : (
             <div
               className={`h-full flex flex-col items-center justify-center p-8 text-center select-none ${
@@ -460,11 +499,11 @@ const JanaXApp: React.FC = () => {
               <div
                 className={`max-w-sm px-7 py-6 rounded-3xl border backdrop-blur-md shadow-xl flex flex-col items-center gap-3 ${
                   theme === 'light'
-                    ? 'bg-white/85 border-slate-200/80 text-slate-900'
-                    : 'bg-[#111923]/80 border-white/[0.08] text-white'
+                    ? 'bg-white/90 border-slate-200/80 text-slate-900'
+                    : 'bg-[#17212b]/90 border-white/[0.08] text-white'
                 }`}
               >
-                <div className="w-14 h-14 rounded-2xl bg-[#2481cc]/15 text-[#2481cc] flex items-center justify-center">
+                <div className="w-14 h-14 rounded-2xl bg-[#3390ec]/15 text-[#3390ec] flex items-center justify-center">
                   <svg className="w-7 h-7 -ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" />
                   </svg>
@@ -483,13 +522,6 @@ const JanaXApp: React.FC = () => {
             </div>
           )}
         </main>
-
-        {/* Right Slide-over: Chat Info Panel */}
-        {showInfoDrawer && activeChat && (
-          <Suspense fallback={null}>
-            <ProfileDrawer />
-          </Suspense>
-        )}
       </div>
 
       {/* Lazy-Loaded Modals & Overlays */}
@@ -525,26 +557,6 @@ const JanaXApp: React.FC = () => {
               clearNativePendingShare();
             }}
           />
-        )}
-
-        {isNewChatOpen && (
-          <NewChatModal
-            isOpen={isNewChatOpen}
-            onClose={() => setIsNewChatOpen(false)}
-            onOpenAdminUsers={() => setIsAdminUsersOpen(true)}
-          />
-        )}
-
-        {groupModalMode !== null && (
-          <NewGroupModal
-            isOpen={groupModalMode !== null}
-            initialTab={groupModalMode || 'create'}
-            onClose={() => setGroupModalMode(null)}
-          />
-        )}
-
-        {isNewChannelOpen && (
-          <NewChannelModal isOpen={isNewChannelOpen} onClose={() => setIsNewChannelOpen(false)} />
         )}
 
         {isNewStoryOpen && (

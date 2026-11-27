@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Menu, Search, X, Calculator, Shield, Camera, ArrowRight } from 'lucide-react';
+import { Menu, Search, X, Calculator, Shield, Camera, ArrowRight, Bookmark } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
 import { FolderFilter } from '../../types/telegram';
 import { getAvatarGradient, getInitials } from '../../utils/telegramHelpers';
 import { groupStoriesByAuthor } from '../../utils/storiesHelper';
+
+export type SearchResultTab = 'chats' | 'media' | 'links' | 'files' | 'voice';
 
 interface SidebarHeaderProps {
   onOpenDrawer: () => void;
@@ -13,6 +15,8 @@ interface SidebarHeaderProps {
   showCollapsedStories?: boolean;
   onExpandStories?: () => void;
   onOpenNewStory?: () => void;
+  searchTab?: SearchResultTab;
+  onSearchTabChange?: (tab: SearchResultTab) => void;
 }
 
 export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
@@ -23,9 +27,20 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
     showCollapsedStories = false,
     onExpandStories,
     onOpenNewStory,
+    searchTab = 'chats',
+    onSearchTabChange,
   }) => {
     const { theme, isAdmin, currentUser, usersMap } = useAuth();
-    const { chats, stories, filter, setFilter, searchQuery, setSearchQuery } = useChat();
+    const {
+      chats,
+      stories,
+      filter,
+      setFilter,
+      searchQuery,
+      setSearchQuery,
+      setActiveChatId,
+      getChatDisplayInfo,
+    } = useChat();
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,6 +66,10 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
       (g) => g.userId !== currentUser?.uid && !g.allViewed
     );
 
+    const frequentChats = useMemo(() => {
+      return chats.slice(0, 10);
+    }, [chats]);
+
     const tabs: { id: FolderFilter; label: string }[] = [
       { id: 'all', label: 'الكل' },
       { id: 'direct', label: 'محادثات' },
@@ -59,9 +78,23 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
       { id: 'saved', label: 'المحفوظة' },
     ];
 
+    const searchTabs: { id: SearchResultTab; label: string }[] = [
+      { id: 'chats', label: 'المحادثات' },
+      { id: 'media', label: 'الوسائط' },
+      { id: 'links', label: 'الروابط' },
+      { id: 'files', label: 'الملفات' },
+      { id: 'voice', label: 'الصوتيات' },
+    ];
+
     const getCount = (tabId: FolderFilter) => {
       if (tabId === 'all') return chats.length;
       return chats.filter((c) => c.type === tabId).length;
+    };
+
+    const closeSearch = () => {
+      setSearchQuery('');
+      onSearchTabChange?.('chats');
+      setIsSearchOpen(false);
     };
 
     return (
@@ -69,7 +102,7 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
         className={`border-b shrink-0 transition-colors ${
           theme === 'light'
             ? 'bg-white border-slate-200/80'
-            : 'bg-[#111923] border-white/[0.06]'
+            : 'bg-[#17212b] border-white/[0.06]'
         }`}
       >
         {/* Top Bar (Telegram Style: Menu + Title / Collapsing Story Rings + Actions) */}
@@ -78,11 +111,8 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
             <div className="flex items-center gap-2 flex-1 animate-in fade-in duration-150">
               <button
                 type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setIsSearchOpen(false);
-                }}
-                className={`min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                onClick={closeSearch}
+                className={`min-h-[40px] min-w-[40px] rounded-full flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                   theme === 'light'
                     ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                     : 'text-[#8496ab] hover:text-white hover:bg-white/[0.06]'
@@ -94,9 +124,6 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
               </button>
 
               <div className="relative flex-1">
-                <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                  <Search className="w-4 h-4 text-[#8496ab]" />
-                </div>
                 <input
                   ref={searchInputRef}
                   type="search"
@@ -104,16 +131,15 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') {
-                      setSearchQuery('');
-                      setIsSearchOpen(false);
+                      closeSearch();
                     }
                   }}
-                  aria-label="ابحث عن جهة اتصال أو نص رسالة"
-                  placeholder="ابحث بالاسم أو نص الرسالة..."
-                  className={`w-full pr-9 pl-8 py-2 text-xs sm:text-sm rounded-xl border outline-hidden transition-all duration-200 ${
+                  aria-label="ابحث في المحادثات أو الرسائل"
+                  placeholder="بحث"
+                  className={`w-full py-1.5 px-2 text-sm bg-transparent outline-hidden ${
                     theme === 'light'
-                      ? 'bg-slate-100/90 border-slate-200/70 text-slate-900 placeholder-slate-400 focus:bg-white focus:border-[#2481cc] focus:ring-2 focus:ring-[#2481cc]/15'
-                      : 'bg-[#1a2533] border-white/[0.06] text-white placeholder-[#8496ab] focus:bg-[#202d3d] focus:border-[#2481cc] focus:ring-2 focus:ring-[#2481cc]/20'
+                      ? 'text-slate-900 placeholder-slate-400'
+                      : 'text-white placeholder-[#7f91a4]'
                   }`}
                 />
                 {searchQuery && (
@@ -122,7 +148,7 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                     onClick={() => setSearchQuery('')}
                     aria-label="مسح البحث"
                     title="مسح البحث"
-                    className={`absolute inset-y-0 left-2.5 flex items-center cursor-pointer ${
+                    className={`absolute inset-y-0 left-1 flex items-center cursor-pointer p-1 ${
                       theme === 'light'
                         ? 'text-slate-400 hover:text-slate-700'
                         : 'text-[#8496ab] hover:text-white'
@@ -140,7 +166,7 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                 <button
                   type="button"
                   onClick={onOpenDrawer}
-                  className={`min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                  className={`min-h-[40px] min-w-[40px] rounded-full flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                     theme === 'light'
                       ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                       : 'text-[#8496ab] hover:text-white hover:bg-white/[0.06]'
@@ -151,19 +177,19 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                   <Menu className="w-5 h-5" />
                 </button>
 
-                <span className="text-base font-extrabold tracking-tight whitespace-nowrap shrink-0">
+                <span className="text-[17px] font-bold tracking-tight whitespace-nowrap shrink-0">
                   JanaX
                 </span>
 
-                {/* Collapsed Overlapping Mini-Story Cluster (appears when scrolled past Stories or collapsed) */}
+                {/* Collapsed Overlapping Mini-Story Cluster (Telegram Header Morph) */}
                 {showCollapsedStories && previewGroups.length > 0 && onExpandStories && (
                   <button
                     type="button"
                     onClick={onExpandStories}
-                    className={`flex items-center gap-1.5 px-2 py-1 rounded-full border transition-all cursor-pointer shrink-0 animate-in fade-in zoom-in-95 duration-200 ${
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-full transition-all cursor-pointer shrink-0 animate-in fade-in zoom-in-95 duration-200 ${
                       theme === 'light'
-                        ? 'bg-slate-100/90 border-slate-200/80 hover:bg-slate-200/70'
-                        : 'bg-[#1a2533] border-white/[0.08] hover:bg-[#223042]'
+                        ? 'bg-slate-100/90 hover:bg-slate-200/70'
+                        : 'bg-[#202b36] hover:bg-[#273543]'
                     }`}
                     title="عرض القصص"
                     aria-label="عرض القصص"
@@ -175,12 +201,12 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                           className={`w-6 h-6 rounded-full p-[1.5px] shrink-0 ${
                             g.allViewed && g.userId !== currentUser?.uid
                               ? 'bg-slate-500/45'
-                              : 'bg-gradient-to-tr from-[#2481cc] via-[#38bdf8] to-[#34d399]'
+                              : 'bg-gradient-to-tr from-[#3390ec] via-[#38bdf8] to-[#34d399]'
                           }`}
                         >
                           <div
                             className={`w-full h-full rounded-full overflow-hidden flex items-center justify-center text-[9px] font-bold text-white border ${
-                              theme === 'light' ? 'border-white' : 'border-[#111923]'
+                              theme === 'light' ? 'border-white' : 'border-[#17212b]'
                             } bg-gradient-to-tr ${getAvatarGradient(g.userId)}`}
                           >
                             {g.userAvatar ? (
@@ -198,7 +224,7 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                     </div>
                     <span
                       className={`text-[11px] font-bold whitespace-nowrap ${
-                        hasUnviewedStories ? 'text-[#2481cc]' : 'opacity-80'
+                        hasUnviewedStories ? 'text-[#3390ec]' : 'opacity-80'
                       }`}
                     >
                       القصص
@@ -208,17 +234,17 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
               </div>
 
               {/* End Zone: Add Story + Search + Admin + Calculator Lock */}
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-0.5 shrink-0">
                 {onOpenNewStory && (
                   <button
                     type="button"
                     onClick={onOpenNewStory}
                     aria-label="إضافة قصة"
                     title="إضافة قصة"
-                    className={`min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                    className={`min-h-[40px] min-w-[40px] rounded-full flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                       theme === 'light'
-                        ? 'text-slate-600 hover:bg-slate-100 hover:text-[#2481cc]'
-                        : 'text-[#8496ab] hover:text-[#2481cc] hover:bg-white/[0.06]'
+                        ? 'text-slate-600 hover:bg-slate-100 hover:text-[#3390ec]'
+                        : 'text-[#8496ab] hover:text-[#3390ec] hover:bg-white/[0.06]'
                     }`}
                   >
                     <Camera className="w-4.5 h-4.5" />
@@ -230,7 +256,7 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                   onClick={() => setIsSearchOpen(true)}
                   aria-label="بحث"
                   title="بحث"
-                  className={`min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                  className={`min-h-[40px] min-w-[40px] rounded-full flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                     theme === 'light'
                       ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                       : 'text-[#8496ab] hover:text-white hover:bg-white/[0.06]'
@@ -245,10 +271,10 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                     onClick={onOpenRegisteredAccounts}
                     aria-label="شاشة الحسابات المسجلة"
                     title="شاشة الحسابات المسجلة"
-                    className={`min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                    className={`min-h-[40px] min-w-[40px] rounded-full flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                       theme === 'light'
-                        ? 'text-[#2481cc] hover:bg-blue-50'
-                        : 'text-sky-400 hover:bg-[#2481cc]/15'
+                        ? 'text-[#3390ec] hover:bg-blue-50'
+                        : 'text-[#5288c1] hover:bg-[#3390ec]/15'
                     }`}
                   >
                     <Shield className="w-4.5 h-4.5" />
@@ -261,7 +287,7 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
                     onClick={onLockToCalculator}
                     aria-label="إخفاء والعودة للآلة الحاسبة"
                     title="إخفاء والعودة للآلة الحاسبة"
-                    className={`min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                    className={`min-h-[40px] min-w-[40px] rounded-full flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                       theme === 'light'
                         ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                         : 'text-[#8496ab] hover:text-white hover:bg-white/[0.06]'
@@ -275,45 +301,115 @@ export const SidebarHeader: React.FC<SidebarHeaderProps> = React.memo(
           )}
         </div>
 
-        {/* Telegram Folder Tabs */}
-        <div className="flex items-center gap-1 px-3 overflow-x-auto no-scrollbar scroll-smooth">
-          {tabs.map((tab) => {
-            const isActive = filter === tab.id;
-            const count = getCount(tab.id);
-            return (
-              <button
-                type="button"
-                key={tab.id}
-                onClick={() => setFilter(tab.id)}
-                className={`relative px-3 py-2.5 text-xs font-semibold whitespace-nowrap shrink-0 transition-colors flex items-center gap-1.5 cursor-pointer ${
-                  isActive
-                    ? 'text-[#2481cc]'
-                    : theme === 'light'
-                    ? 'text-slate-500 hover:text-slate-900'
-                    : 'text-[#8496ab] hover:text-white'
-                }`}
-              >
-                <span>{tab.label}</span>
-                {count > 0 && (
-                  <span
-                    className={`text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded-md leading-none ${
+        {/* Telegram Global Search: Horizontal Top Contacts Strip + Result Tabs */}
+        {isSearchOpen ? (
+          <div className="animate-in fade-in duration-150">
+            {!searchQuery.trim() && frequentChats.length > 0 && (
+              <div className="px-3 pt-1 pb-2.5 flex items-center gap-3 overflow-x-auto no-scrollbar">
+                {frequentChats.map((c) => {
+                  const info = getChatDisplayInfo(c);
+                  return (
+                    <button
+                      type="button"
+                      key={c.id}
+                      onClick={() => {
+                        setActiveChatId(c.id);
+                        closeSearch();
+                      }}
+                      className="flex flex-col items-center gap-1 w-14 shrink-0 cursor-pointer group"
+                    >
+                      <div
+                        className={`w-11 h-11 rounded-full flex items-center justify-center font-bold text-xs text-white overflow-hidden shadow-xs transition-transform group-hover:scale-105 bg-gradient-to-tr ${getAvatarGradient(
+                          info.otherUser?.uid || c.id
+                        )}`}
+                      >
+                        {c.type === 'saved' ? (
+                          <Bookmark className="w-5 h-5 text-white" />
+                        ) : info.photoURL ? (
+                          <img
+                            src={info.photoURL}
+                            alt={info.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span>{getInitials(info.title)}</span>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-medium truncate w-full text-center opacity-85">
+                        {info.title.split(' ')[0]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex items-center gap-1 px-3 overflow-x-auto no-scrollbar scroll-smooth">
+              {searchTabs.map((t) => {
+                const isActive = searchTab === t.id;
+                return (
+                  <button
+                    type="button"
+                    key={t.id}
+                    onClick={() => onSearchTabChange?.(t.id)}
+                    className={`relative px-3 py-2 text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                       isActive
-                        ? 'bg-[#2481cc] text-white'
+                        ? 'text-[#3390ec]'
                         : theme === 'light'
-                        ? 'bg-slate-100 text-slate-600'
-                        : 'bg-white/[0.07] text-[#8496ab]'
+                        ? 'text-slate-500 hover:text-slate-900'
+                        : 'text-[#8496ab] hover:text-white'
                     }`}
                   >
-                    {count}
-                  </span>
-                )}
-                {isActive && (
-                  <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#2481cc] rounded-full" />
-                )}
-              </button>
-            );
-          })}
-        </div>
+                    <span>{t.label}</span>
+                    {isActive && (
+                      <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#3390ec] rounded-full" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* Telegram Folder Tabs */
+          <div className="flex items-center gap-1 px-3 overflow-x-auto no-scrollbar scroll-smooth">
+            {tabs.map((tab) => {
+              const isActive = filter === tab.id;
+              const count = getCount(tab.id);
+              return (
+                <button
+                  type="button"
+                  key={tab.id}
+                  onClick={() => setFilter(tab.id)}
+                  className={`relative px-3 py-2.5 text-xs font-semibold whitespace-nowrap shrink-0 transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    isActive
+                      ? 'text-[#3390ec]'
+                      : theme === 'light'
+                      ? 'text-slate-500 hover:text-slate-900'
+                      : 'text-[#8496ab] hover:text-white'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  {count > 0 && (
+                    <span
+                      className={`text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded-full leading-none ${
+                        isActive
+                          ? 'bg-[#3390ec] text-white'
+                          : theme === 'light'
+                          ? 'bg-slate-100 text-slate-600'
+                          : 'bg-white/[0.08] text-[#8496ab]'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                  {isActive && (
+                    <div className="absolute bottom-0 left-2 right-2 h-[2.5px] bg-[#3390ec] rounded-t-full" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

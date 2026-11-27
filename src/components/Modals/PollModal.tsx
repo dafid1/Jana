@@ -75,22 +75,31 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none">
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-xs select-none animate-in fade-in duration-150"
+      onClick={onClose}
+    >
       <div
-        className={`w-full max-w-md rounded-3xl p-6 shadow-2xl border text-right transition-all ${
+        onClick={(e) => e.stopPropagation()}
+        className={`w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border text-right transition-all max-h-[90vh] overflow-y-auto tg-sheet-up ${
           theme === 'light'
             ? 'bg-white border-gray-200 text-gray-900'
-            : 'bg-[#17212b] border-[#2b3a4a] text-white'
+            : 'bg-[#17212b] border-white/[0.08] text-white'
         }`}
       >
+        <div className="sm:hidden flex justify-center -mt-2 mb-3">
+          <div className="w-10 h-1 rounded-full bg-slate-400/40" />
+        </div>
+
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold flex items-center gap-2">
-            <BarChart2 className="w-5 h-5 text-[#2481cc]" />
+            <BarChart2 className="w-5 h-5 text-[#3390ec]" />
             <span>إنشاء استطلاع رأي</span>
           </h2>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 rounded-full text-[#7f91a4] hover:text-white hover:bg-white/10"
+            className="w-9 h-9 rounded-full flex items-center justify-center text-[#7f91a4] hover:text-white hover:bg-white/10 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -98,7 +107,7 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold mb-1 opacity-80">سؤال الاستطلاع</label>
+            <label className="block text-xs font-semibold mb-1.5 opacity-80">سؤال الاستطلاع</label>
             <input
               type="text"
               required
@@ -107,14 +116,14 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
               placeholder="اكتب سؤالك هنا..."
               className={`w-full px-3.5 py-2.5 text-sm rounded-xl outline-hidden border ${
                 theme === 'light'
-                  ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#2481cc]'
-                  : 'bg-[#242f3d] border-[#2b3a4a] text-white focus:border-[#2481cc]'
+                  ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#3390ec]'
+                  : 'bg-[#242f3d] border-white/[0.08] text-white focus:border-[#3390ec]'
               }`}
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold mb-1 opacity-80">خيارات التصويت</label>
+            <label className="block text-xs font-semibold mb-1.5 opacity-80">خيارات التصويت</label>
             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
               {options.map((opt, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -125,15 +134,15 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
                     placeholder={`الخيار ${i + 1}`}
                     className={`flex-1 px-3 py-2 text-xs rounded-xl outline-hidden border ${
                       theme === 'light'
-                        ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#2481cc]'
-                        : 'bg-[#242f3d] border-[#2b3a4a] text-white focus:border-[#2481cc]'
+                        ? 'bg-gray-50 border-gray-200 text-gray-900 focus:border-[#3390ec]'
+                        : 'bg-[#242f3d] border-white/[0.08] text-white focus:border-[#3390ec]'
                     }`}
                   />
                   {options.length > 2 && (
                     <button
                       type="button"
                       onClick={() => handleRemoveOption(i)}
-                      className="p-2 text-[#7f91a4] hover:text-red-400 hover:bg-white/5 rounded-xl transition-colors"
+                      className="p-2 text-[#7f91a4] hover:text-red-400 hover:bg-white/5 rounded-xl transition-colors cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -146,7 +155,7 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
               <button
                 type="button"
                 onClick={handleAddOption}
-                className="mt-2 text-xs text-[#2481cc] font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+                className="mt-2 text-xs text-[#3390ec] font-semibold flex items-center gap-1 hover:underline cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>إضافة خيار آخر</span>
@@ -155,19 +164,19 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
           </div>
 
           {/* Settings Switches */}
-          <div className="space-y-2 pt-2 border-t border-white/10 text-xs">
+          <div className="space-y-3 pt-3 border-t border-white/10 text-xs">
             <div className="flex items-center justify-between">
               <span>تصويت مجهول الهوية</span>
               <button
                 type="button"
                 onClick={() => setIsAnonymous(!isAnonymous)}
-                className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
-                  isAnonymous ? 'bg-[#2481cc]' : 'bg-gray-400'
+                className={`w-10 h-5.5 rounded-full p-0.5 transition-colors cursor-pointer ${
+                  isAnonymous ? 'bg-[#3390ec]' : 'bg-gray-400'
                 }`}
               >
                 <div
-                  className={`w-4 h-4 rounded-full bg-white shadow-xs transform transition-transform ${
-                    isAnonymous ? '-translate-x-4' : 'translate-x-0'
+                  className={`w-4.5 h-4.5 rounded-full bg-white shadow-xs transform transition-transform ${
+                    isAnonymous ? '-translate-x-4.5' : 'translate-x-0'
                   }`}
                 />
               </button>
@@ -178,13 +187,13 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
               <button
                 type="button"
                 onClick={() => setMultipleAnswers(!multipleAnswers)}
-                className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
-                  multipleAnswers ? 'bg-[#2481cc]' : 'bg-gray-400'
+                className={`w-10 h-5.5 rounded-full p-0.5 transition-colors cursor-pointer ${
+                  multipleAnswers ? 'bg-[#3390ec]' : 'bg-gray-400'
                 }`}
               >
                 <div
-                  className={`w-4 h-4 rounded-full bg-white shadow-xs transform transition-transform ${
-                    multipleAnswers ? '-translate-x-4' : 'translate-x-0'
+                  className={`w-4.5 h-4.5 rounded-full bg-white shadow-xs transform transition-transform ${
+                    multipleAnswers ? '-translate-x-4.5' : 'translate-x-0'
                   }`}
                 />
               </button>
@@ -194,9 +203,9 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-2.5 rounded-xl bg-[#2481cc] hover:bg-[#2172b5] text-white font-bold text-xs shadow-md transition-all hover:scale-[1.01] cursor-pointer disabled:opacity-50"
+            className="w-full py-3 rounded-xl bg-[#3390ec] hover:bg-[#2a7fd4] text-white font-bold text-xs shadow-md transition-all hover:scale-[1.01] cursor-pointer disabled:opacity-50"
           >
-            {isSubmitting ? 'جاري النشر...' : 'إرسال الاستطلاع'}
+            {isSubmitting ? 'جاري النشر...' : 'إنشاء وإرسال الاستطلاع'}
           </button>
         </form>
       </div>

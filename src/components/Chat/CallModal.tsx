@@ -70,54 +70,53 @@ export const CallModal: React.FC = () => {
       : `متصل • ${formatDuration(callState.duration)}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 select-none animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center tg-call-mesh select-none animate-in fade-in duration-200 overflow-hidden">
       {/* Hidden audio output element for remote WebRTC audio tracks */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
-      {/* Background Ambience */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20 blur-3xl">
-        <div className="w-full h-full bg-gradient-to-tr from-[#2481cc] via-[#8c5fd1] to-[#e17076]" />
-      </div>
+      {/* Subtle Ambient Vignette */}
+      <div className="absolute inset-0 bg-black/25 pointer-events-none" />
 
       {/* Top Header: Title, Timer, and Encryption Emojis */}
-      <div className="absolute top-5 inset-x-6 flex items-center justify-between text-white z-20">
+      <div className="absolute top-6 inset-x-5 sm:inset-x-8 flex items-start justify-between text-white z-20">
         <div>
-          <h2 className="text-lg font-bold leading-tight">{displayInfo.title}</h2>
-          <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium mt-0.5">
+          <h2 className="text-xl sm:text-2xl font-extrabold leading-tight tracking-tight drop-shadow-sm">
+            {displayInfo.title}
+          </h2>
+          <div className="flex items-center gap-2 text-xs text-white/90 font-medium mt-1">
             <span
               className={`w-2 h-2 rounded-full ${
                 callState.status === 'connected'
-                  ? 'bg-emerald-400 animate-pulse'
+                  ? 'bg-emerald-300 animate-pulse'
                   : callState.status === 'ended' || callState.status === 'declined'
                   ? 'bg-rose-400'
-                  : 'bg-amber-400 animate-ping'
+                  : 'bg-white animate-ping'
               }`}
             />
             <span className="tabular-nums">{statusText}</span>
           </div>
         </div>
 
-        {/* Encryption Emojis */}
+        {/* Telegram Call Encryption Emojis Pill */}
         <div className="flex flex-col items-end">
-          <div className="flex items-center gap-1.5 p-1.5 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-base shadow-lg">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/25 backdrop-blur-xl border border-white/15 text-base shadow-lg">
             {CALL_ENCRYPTION_EMOJIS.slice(0, 4).map((emoji, i) => (
               <span key={i} title="مفتاح تشفير المكالمة">
                 {emoji}
               </span>
             ))}
           </div>
-          <span className="text-[10px] text-white/60 mt-1 flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-emerald-400" />
-            <span>تشفير تام WebRTC E2EE</span>
+          <span className="text-[10px] text-white/75 mt-1.5 flex items-center gap-1">
+            <ShieldCheck className="w-3 h-3 text-emerald-300" />
+            <span>مكالمة مشفرة</span>
           </span>
         </div>
       </div>
 
       {/* Main Remote Video or Avatar Centerpiece */}
-      <div className="relative w-full max-w-4xl h-[70vh] flex flex-col items-center justify-center z-10 px-4">
+      <div className="relative w-full max-w-4xl h-[68vh] flex flex-col items-center justify-center z-10 px-4">
         {callState.isVideo ? (
-          <div className="relative w-full h-full rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-[#111827] flex items-center justify-center">
-            {/* Main Stream (Remote by default, Local if swapped) */}
+          <div className="relative w-full h-full rounded-3xl overflow-hidden border border-white/15 shadow-2xl bg-[#0e1621]/90 flex items-center justify-center">
             {isSwapped ? (
               !callState.isCameraOff && hasLocalVideoTrack ? (
                 <video
@@ -129,7 +128,7 @@ export const CallModal: React.FC = () => {
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center text-white/70 gap-2">
-                  <VideoOff className="w-10 h-10 text-gray-500" />
+                  <VideoOff className="w-10 h-10 text-gray-400" />
                   <span className="text-xs">الكاميرا مغلقة</span>
                 </div>
               )
@@ -143,7 +142,7 @@ export const CallModal: React.FC = () => {
             ) : (
               <div className="flex flex-col items-center justify-center gap-3 text-center p-6">
                 <div
-                  className={`w-28 h-28 rounded-full flex items-center justify-center font-bold text-3xl text-white shadow-2xl overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
+                  className={`w-28 h-28 rounded-full flex items-center justify-center font-bold text-3xl text-white shadow-2xl overflow-hidden ring-2 ring-white/25 bg-gradient-to-tr ${getAvatarGradient(
                     displayInfo.otherUser?.uid || chat.id
                   )}`}
                 >
@@ -157,7 +156,7 @@ export const CallModal: React.FC = () => {
                     <span>{getInitials(displayInfo.title)}</span>
                   )}
                 </div>
-                <span className="text-xs text-white/70">
+                <span className="text-xs text-white/80">
                   {callState.status === 'connected'
                     ? 'في انتظار تشغيل الكاميرا من الطرف الآخر...'
                     : statusText}
@@ -165,12 +164,12 @@ export const CallModal: React.FC = () => {
               </div>
             )}
 
-            {/* PiP Preview (clickable to swap view) */}
+            {/* PiP Preview */}
             <button
               type="button"
               onClick={() => setIsSwapped((prev) => !prev)}
               title="تبديل العرض"
-              className="absolute bottom-4 left-4 w-32 sm:w-36 h-44 sm:h-48 rounded-2xl overflow-hidden border-2 border-white/25 shadow-xl bg-black/90 cursor-pointer group"
+              className="absolute bottom-4 left-4 w-30 sm:w-36 h-42 sm:h-48 rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl bg-black/90 cursor-pointer group"
             >
               {!isSwapped ? (
                 !callState.isCameraOff && hasLocalVideoTrack ? (
@@ -182,8 +181,8 @@ export const CallModal: React.FC = () => {
                     className="w-full h-full object-cover -scale-x-100"
                   />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-white text-xs">
-                    <VideoOff className="w-6 h-6 text-gray-500 mb-1" />
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-[#17212b] text-white text-xs">
+                    <VideoOff className="w-6 h-6 text-gray-400 mb-1" />
                     <span>الكاميرا مغلقة</span>
                   </div>
                 )
@@ -195,21 +194,20 @@ export const CallModal: React.FC = () => {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-slate-900 text-white text-xs font-bold">
+                <div className="w-full h-full flex items-center justify-center bg-[#17212b] text-white text-xs font-bold">
                   {getInitials(displayInfo.title)}
                 </div>
               )}
-              <span className="absolute top-2 right-2 p-1 rounded-full bg-black/50 text-white/80 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="absolute top-2 right-2 p-1 rounded-full bg-black/50 text-white/85 opacity-0 group-hover:opacity-100 transition-opacity">
                 <RefreshCw className="w-3.5 h-3.5" />
               </span>
             </button>
           </div>
         ) : (
-          /* Voice Call Big Avatar with Wave Pulse */
           <div className="flex flex-col items-center text-center">
-            <div className="relative mb-6">
+            <div className="relative mb-7">
               <div
-                className={`w-32 h-32 rounded-full flex items-center justify-center font-bold text-4xl text-white shadow-2xl overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
+                className={`w-36 h-36 rounded-full flex items-center justify-center font-bold text-4xl text-white shadow-2xl ring-2 ring-white/25 overflow-hidden bg-gradient-to-tr ${getAvatarGradient(
                   displayInfo.otherUser?.uid || chat.id
                 )} relative z-10`}
               >
@@ -220,75 +218,87 @@ export const CallModal: React.FC = () => {
                 )}
               </div>
 
-              <div className="absolute inset-0 rounded-full border-4 border-[#2481cc] animate-ping opacity-25" />
-              <div className="absolute -inset-4 rounded-full border-2 border-sky-400/30 animate-pulse" />
+              <div className="absolute -inset-2 rounded-full border-2 border-white/40 animate-ping opacity-30" />
+              <div className="absolute -inset-6 rounded-full border border-white/20 animate-pulse" />
             </div>
 
-            <p className="text-sm text-sky-200/90 font-medium">
+            <p className="text-xs text-white/80 font-medium px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-md">
               {callState.status === 'calling'
-                ? 'جاري إنشاء اتصال WebRTC آمن...'
-                : 'جودة الصوت فائقة الدقة (HD Voice)'}
+                ? 'جاري تبادل المفاتيح وتأسيس الاتصال...'
+                : 'اتصال صوتي فائق الجودة (WebRTC)'}
             </p>
           </div>
         )}
       </div>
 
-      {/* Bottom Floating Control Bar */}
-      <div className="absolute bottom-8 inset-x-0 flex items-center justify-center gap-4 z-20">
-        <div className="flex items-center gap-3 p-3 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl">
-          <button
-            type="button"
-            onClick={toggleMute}
-            className={`w-12 h-12 rounded-full flex items-center justify-center transition-transform hover:scale-110 active:scale-95 cursor-pointer ${
-              callState.isMuted
-                ? 'bg-red-500 text-white'
-                : 'bg-white/15 hover:bg-white/25 text-white'
-            }`}
-            title={callState.isMuted ? 'إلغاء كتم الصوت' : 'كتم الصوت'}
-          >
-            {callState.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
-
-          {callState.isVideo && (
+      {/* Bottom Telegram Glassmorphic Call Action Bar */}
+      <div className="absolute bottom-8 inset-x-0 flex items-center justify-center z-20 px-4">
+        <div className="flex items-center gap-4 sm:gap-5 px-5 py-3 rounded-full bg-black/30 backdrop-blur-2xl border border-white/15 shadow-2xl">
+          <div className="flex flex-col items-center gap-1">
             <button
               type="button"
-              onClick={toggleCamera}
-              className={`w-12 h-12 rounded-full flex items-center justify-center transition-transform hover:scale-110 active:scale-95 cursor-pointer ${
-                callState.isCameraOff
-                  ? 'bg-red-500 text-white'
+              onClick={() => setIsSpeaker((prev) => !prev)}
+              className={`w-13 h-13 rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                isSpeaker
+                  ? 'bg-white text-[#17212b]'
                   : 'bg-white/15 hover:bg-white/25 text-white'
               }`}
-              title={callState.isCameraOff ? 'تشغيل الكاميرا' : 'إيقاف الكاميرا'}
+              title={isSpeaker ? 'إلغاء مكبر الصوت' : 'تشغيل مكبر الصوت'}
             >
-              {callState.isCameraOff ? (
-                <VideoOff className="w-5 h-5" />
-              ) : (
-                <Video className="w-5 h-5" />
-              )}
+              {isSpeaker ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
             </button>
+            <span className="text-[10px] text-white/75 font-medium">مكبر</span>
+          </div>
+
+          {callState.isVideo && (
+            <div className="flex flex-col items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleCamera}
+                className={`w-13 h-13 rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                  callState.isCameraOff
+                    ? 'bg-white text-[#17212b]'
+                    : 'bg-white/15 hover:bg-white/25 text-white'
+                }`}
+                title={callState.isCameraOff ? 'تشغيل الكاميرا' : 'إيقاف الكاميرا'}
+              >
+                {callState.isCameraOff ? (
+                  <VideoOff className="w-5 h-5" />
+                ) : (
+                  <Video className="w-5 h-5" />
+                )}
+              </button>
+              <span className="text-[10px] text-white/75 font-medium">فيديو</span>
+            </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => setIsSpeaker((prev) => !prev)}
-            className={`w-12 h-12 rounded-full flex items-center justify-center transition-transform hover:scale-110 active:scale-95 cursor-pointer ${
-              !isSpeaker
-                ? 'bg-red-500 text-white'
-                : 'bg-white/15 hover:bg-white/25 text-white'
-            }`}
-            title={isSpeaker ? 'كتم مكبر الصوت' : 'تشغيل مكبر الصوت'}
-          >
-            {isSpeaker ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-          </button>
+          <div className="flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={toggleMute}
+              className={`w-13 h-13 rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                callState.isMuted
+                  ? 'bg-white text-[#17212b]'
+                  : 'bg-white/15 hover:bg-white/25 text-white'
+              }`}
+              title={callState.isMuted ? 'إلغاء الكتم' : 'كتم'}
+            >
+              {callState.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+            <span className="text-[10px] text-white/75 font-medium">كتم</span>
+          </div>
 
-          <button
-            type="button"
-            onClick={endCall}
-            className="w-13 h-13 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110 active:scale-95 cursor-pointer ml-2"
-            title="إنهاء المكالمة"
-          >
-            <PhoneOff className="w-6 h-6" />
-          </button>
+          <div className="flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={endCall}
+              className="w-14 h-14 rounded-full bg-[#e53935] hover:bg-[#d32f2f] text-white flex items-center justify-center shadow-lg shadow-[#e53935]/40 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              title="إنهاء المكالمة"
+            >
+              <PhoneOff className="w-6 h-6" />
+            </button>
+            <span className="text-[10px] text-white/75 font-medium">إنهاء</span>
+          </div>
         </div>
       </div>
     </div>

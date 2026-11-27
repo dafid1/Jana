@@ -167,6 +167,7 @@ interface ChatContextType {
     caption?: string,
     onProgress?: (percent: number) => void
   ) => Promise<void>;
+  sendVideoNote: (blob: Blob, durationSeconds: number) => Promise<void>;
   deleteMessages: (messageIds: string[], mode: 'me' | 'everyone') => Promise<void>;
   editMessageText: (messageId: string, newText: string) => Promise<void>;
   toggleReaction: (messageId: string, emoji: string) => Promise<void>;
@@ -215,7 +216,7 @@ interface ChatContextType {
 const ChatContext = createContext<ChatContextType | null>(null);
 
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, userProfile, usersMap, isAdmin } = useAuth();
+  const { currentUser, userProfile, usersMap, isAdmin, toggleMarkChatUnread } = useAuth();
   const [rawChats, setRawChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1710,6 +1711,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             'lastMessage.readBy': arrayUnion(currentUser.uid),
           }).catch(() => {});
         }
+        if (userProfile?.manualUnreadChatIds?.includes(chatId)) {
+          toggleMarkChatUnread(chatId, false).catch(() => {});
+        }
       },
       async (error) => {
         const fbCode = (error as { code?: string })?.code;
@@ -2587,6 +2591,25 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  // Send circular Telegram Video Note
+  const sendVideoNote = async (blob: Blob, durationSeconds: number) => {
+    if (!currentUser || !activeChatId || !activeChat) return;
+    const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+    const fileName = `video_note_${Date.now()}.${ext}`;
+    const res = await uploadMediaWithFallback(
+      blob,
+      `chats/${activeChatId}/video_notes`,
+      fileName
+    );
+    await sendMessage('رسالة فيديو دائرية', 'video', {
+      mediaUrl: res.url,
+      mediaName: fileName,
+      mediaSize: formatBytes(blob.size),
+      voiceDuration: Math.max(1, durationSeconds),
+      isVideoNote: true,
+    });
+  };
+
   // Delete single or multiple messages ("for me" or "for everyone")
   const deleteMessages = async (messageIds: string[], mode: 'me' | 'everyone') => {
     if (!currentUser || !activeChatId || messageIds.length === 0) return;
@@ -3343,6 +3366,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       joinGroupByInvite,
       sendMessage,
       sendVideoMessage,
+      sendVideoNote,
       deleteMessages,
       editMessageText,
       toggleReaction,

@@ -171,23 +171,28 @@ export const ForwardModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/65 backdrop-blur-xs select-none animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/65 backdrop-blur-xs select-none animate-in fade-in duration-150"
       onClick={() => {
         if (!isForwarding) closeForwardModal();
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`w-full max-w-md rounded-3xl shadow-2xl border text-right transition-all max-h-[88vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 ${
+        className={`w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl border text-right transition-all max-h-[90vh] sm:max-h-[88vh] flex flex-col overflow-hidden tg-sheet-up ${
           theme === 'light'
             ? 'bg-white border-slate-200/80 text-slate-900'
-            : 'bg-[#111923] border-white/[0.08] text-white'
+            : 'bg-[#17212b] border-white/[0.08] text-white'
         }`}
       >
+        {/* Telegram Mobile Drag Handle */}
+        <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-slate-400/40" />
+        </div>
+
         {/* Header */}
         <div
-          className={`px-5 pt-5 pb-3.5 border-b shrink-0 ${
-            theme === 'light' ? 'border-slate-100' : 'border-white/[0.06]'
+          className={`px-5 pt-3 sm:pt-5 pb-3.5 border-b shrink-0 ${
+            theme === 'light' ? 'border-slate-100' : 'border-[#0e1621]'
           }`}
         >
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -565,7 +570,7 @@ export const ForwardModal: React.FC = () => {
           className={`px-4 py-3.5 border-t space-y-2.5 shrink-0 ${
             theme === 'light'
               ? 'border-slate-100 bg-slate-50/70'
-              : 'border-white/[0.06] bg-[#0e151f]'
+              : 'border-[#0e1621] bg-[#0e1621]'
           }`}
         >
           <input
@@ -573,10 +578,10 @@ export const ForwardModal: React.FC = () => {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             placeholder="أضف رسالة أو تعليقاً قبل التحويل (اختياري)..."
-            className={`w-full px-3.5 py-2 text-xs rounded-xl outline-hidden border transition-colors ${
+            className={`w-full px-3.5 py-2.5 text-xs rounded-xl outline-hidden border transition-colors ${
               theme === 'light'
-                ? 'bg-white border-slate-200/80 text-slate-900 placeholder-slate-400 focus:border-[#2481cc]'
-                : 'bg-[#1a2533] border-white/[0.07] text-white placeholder-[#7f91a4] focus:border-[#2481cc]'
+                ? 'bg-white border-slate-200/80 text-slate-900 placeholder-slate-400 focus:border-[#3390ec]'
+                : 'bg-[#242f3d] border-white/[0.07] text-white placeholder-[#7f91a4] focus:border-[#3390ec]'
             }`}
           />
 
@@ -584,7 +589,7 @@ export const ForwardModal: React.FC = () => {
             type="button"
             disabled={selectedList.length === 0 || isForwarding}
             onClick={handleConfirmForward}
-            className="w-full py-2.5 px-4 rounded-xl bg-[#2481cc] hover:bg-[#1e6fb1] text-white text-xs font-bold shadow-lg shadow-[#2481cc]/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed disabled:shadow-none"
+            className="w-full py-3 px-4 rounded-xl bg-[#3390ec] hover:bg-[#2a7fd4] text-white text-xs font-bold shadow-lg shadow-[#3390ec]/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed disabled:shadow-none"
           >
             {isForwarding ? (
               <>
